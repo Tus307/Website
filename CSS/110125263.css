@@ -1,0 +1,6 @@
+p{
+  color: rgb(205, 211, 205);
+  -webkit-text-stroke: 1px black;
+  font-family:'Courier New', Courier, monospace;
+  font-size: 20px;
+}
