@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trình Trực Quan Hóa Mật Mã</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- Nền hiệu ứng dòng mã nền (thuần CSS, chỉ mang tính trang trí) -->
+<div class="cipher-stream" aria-hidden="true"></div>
+
+<div class="app-shell">
+
+  <!-- ============ HEADER ============ -->
+  <header id="app-header" class="app-header">
+    <div class="header-brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="6" y="14" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+          <path d="M11 14V10a5 5 0 0 1 10 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="16" cy="20" r="1.6" fill="currentColor"/>
+        </svg>
+      </span>
+      <div class="brand-text">
+        <h1 class="brand-title">Trình Trực Quan Hóa Mật Mã</h1>
+        <p class="brand-subtitle">Khám phá từng bước hoạt động của các thuật toán mã hóa</p>
+      </div>
+    </div>
+    <div class="header-status">
+      <span class="status-dot" id="status-indicator" aria-hidden="true"></span>
+      <span class="status-label" id="status-label">Sẵn sàng</span>
+    </div>
+  </header>
+
+  <!-- ============ MAIN LAYOUT ============ -->
+  <div class="app-body">
+
+    <!-- ============ SIDEBAR: CẤU HÌNH & ĐIỀU KHIỂN ============ -->
+    <aside id="control-panel" class="control-panel glass-panel" aria-label="Bảng điều khiển">
+
+      <section class="control-section" id="section-algorithm">
+        <h2 class="section-title">Thuật toán</h2>
+        <label class="field-label" for="algorithm-select">Chọn thuật toán mã hóa</label>
+        <div class="select-wrap">
+          <select id="algorithm-select" class="select-input" name="algorithm">
+            <option value="caesar">Caesar Cipher — Mã hóa dịch chuyển</option>
+            <option value="vigenere">Vigenère Cipher — Mã hóa đa bảng</option>
+            <option value="aes">AES — Mã hóa khối đối xứng</option>
+            <option value="rsa">RSA — Mã hóa khóa công khai</option>
+            <option value="sha256">SHA-256 — Hàm băm</option>
+            <option value="base64">Base64 — Mã hóa biểu diễn</option>
+            <option value="xor">XOR — Phép toán bit (Text vs Text)</option>
+            <option value="and">AND — Phép toán bit (Text vs Text)</option>
+            <option value="or">OR — Phép toán bit (Text vs Text)</option>
+            <option value="md5">MD5 — Hàm băm (minh họa)</option>
+          </select>
+          <svg class="select-caret" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M3 5.5L7 9.5L11 5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+        <div class="mode-toggle" id="mode-toggle" role="radiogroup" aria-label="Chế độ xử lý">
+          <input type="radio" name="mode" id="mode-encrypt" class="mode-radio" checked>
+          <label for="mode-encrypt" class="mode-label">Mã hóa</label>
+          <input type="radio" name="mode" id="mode-decrypt" class="mode-radio">
+          <label for="mode-decrypt" class="mode-label">Giải mã</label>
+        </div>
+      </section>
+
+      <section class="control-section" id="section-input">
+        <h2 class="section-title">Dữ liệu đầu vào</h2>
+
+        <label class="field-label" for="input-primary">Văn bản đầu vào</label>
+        <textarea id="input-primary" class="text-input" name="primary-input" rows="4"
+          placeholder="Nhập văn bản cần mã hóa hoặc giải mã..."></textarea>
+
+        <div id="input-secondary-wrap" class="field-group is-hidden">
+          <label class="field-label" for="input-secondary">Khóa / Tham số</label>
+          <input type="text" id="input-secondary" class="text-input single-line" name="secondary-input"
+            placeholder="Nhập khóa bí mật hoặc tham số...">
+          <p class="field-hint" id="input-secondary-hint">Trường này sẽ hiện ra khi thuật toán yêu cầu khóa.</p>
+        </div>
+      </section>
+
+      <section class="control-section" id="section-controls">
+        <h2 class="section-title">Điều khiển mô phỏng</h2>
+        <div class="control-buttons" id="control-buttons">
+          <button type="button" id="btn-simulate" class="btn btn-primary" title="Chạy toàn bộ mô phỏng">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11l9-5.5-9-5.5z"/></svg>
+            Mô phỏng
+          </button>
+          <button type="button" id="btn-step" class="btn btn-secondary" title="Thực hiện từng bước một">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 3v10M6 8h7m0 0-3-3m3 3-3 3"/></svg>
+            Từng bước
+          </button>
+          <button type="button" id="btn-autorun" class="btn btn-secondary" title="Tự động chạy liên tục">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 8a6 6 0 1 1 2.2 4.65"/><path d="M2 12v-3h3"/></svg>
+            Chạy tự động
+          </button>
+          <button type="button" id="btn-pause" class="btn btn-secondary" title="Tạm dừng mô phỏng">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><rect x="3" y="2.5" width="3.4" height="11" rx="0.6"/><rect x="9.6" y="2.5" width="3.4" height="11" rx="0.6"/></svg>
+            Tạm dừng
+          </button>
+          <button type="button" id="btn-prev" class="btn btn-ghost" title="Quay lại bước trước">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9.5 3 4.5 8l5 5"/></svg>
+            Lùi
+          </button>
+          <button type="button" id="btn-next" class="btn btn-ghost" title="Sang bước tiếp theo">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6.5 3 11.5 8l-5 5"/></svg>
+            Tiếp
+          </button>
+          <button type="button" id="btn-reset" class="btn btn-danger-ghost" title="Đặt lại toàn bộ mô phỏng">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M13 8A5 5 0 1 1 11.5 4.3"/><path d="M13 2.5v3.3h-3.3"/></svg>
+            Đặt lại
+          </button>
+        </div>
+      </section>
+
+      <section class="control-section" id="section-speed">
+        <h2 class="section-title">Tốc độ mô phỏng</h2>
+        <div class="speed-row">
+          <label class="field-label" for="speed-slider">Điều chỉnh tốc độ chạy tự động</label>
+          <output for="speed-slider" id="speed-value" class="speed-value">1.0×</output>
+        </div>
+        <input type="range" id="speed-slider" class="speed-slider" name="speed" min="1" max="10" step="1" value="4"
+          aria-describedby="speed-value">
+        <div class="speed-scale" aria-hidden="true">
+          <span>Chậm</span>
+          <span>Nhanh</span>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- ============ MAIN CONTENT ============ -->
+    <main id="main-content" class="main-content">
+
+      <!-- Thanh tiến trình -->
+      <div id="progress-section" class="progress-section glass-panel">
+        <div class="progress-meta">
+          <span class="progress-label" id="progress-label">Tiến trình mô phỏng</span>
+          <span class="progress-count" id="progress-count">Bước 0 / 0</span>
+        </div>
+        <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs-wrap">
+        <nav class="tabs" id="main-tabs" role="tablist" aria-label="Chuyển đổi khung nhìn">
+          <input type="radio" name="tabs" id="tab-visualization" class="tab-radio" checked>
+          <label for="tab-visualization" class="tab-label" role="tab">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 10.5 6 6.5l2.5 2.5L14 5"/></svg>
+            Trực quan hóa
+          </label>
+
+          <input type="radio" name="tabs" id="tab-timeline" class="tab-radio">
+          <label for="tab-timeline" class="tab-label" role="tab">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 8h12M5 4v8M11 4v8"/></svg>
+            Dòng thời gian
+          </label>
+
+          <input type="radio" name="tabs" id="tab-logger" class="tab-radio">
+          <label for="tab-logger" class="tab-label" role="tab">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 2.5h10v11H3z"/><path d="M5.2 5.5h5.6M5.2 8h5.6M5.2 10.5h3.2"/></svg>
+            Nhật ký
+          </label>
+
+          <input type="radio" name="tabs" id="tab-result" class="tab-radio">
+          <label for="tab-result" class="tab-label" role="tab">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 8.5 3 3 7-7.5"/></svg>
+            Kết quả
+          </label>
+
+          <input type="radio" name="tabs" id="tab-explanation" class="tab-radio">
+          <label for="tab-explanation" class="tab-label" role="tab">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 11v-.01M8 8.4c0-1.4 1.6-1.3 1.6-2.6C9.6 4.7 8.9 4 8 4S6.4 4.7 6.4 5.8"/></svg>
+            Giải thích
+          </label>
+        </nav>
+
+        <!-- ===== PANEL: TRỰC QUAN HÓA ===== -->
+        <section id="panel-visualization" class="tab-panel glass-panel">
+          <div class="panel-heading">
+            <h2 class="panel-title">Trực quan hóa thuật toán</h2>
+            <span class="panel-tag" id="visualization-algo-tag">Caesar Cipher</span>
+          </div>
+          <div id="visualization-canvas" class="visualization-canvas">
+            <p class="canvas-placeholder">Khu vực trực quan hóa các bước biến đổi dữ liệu sẽ hiển thị tại đây.</p>
+          </div>
+        </section>
+
+        <!-- ===== PANEL: DÒNG THỜI GIAN ===== -->
+        <section id="panel-timeline" class="tab-panel glass-panel">
+          <div class="panel-heading">
+            <h2 class="panel-title">Dòng thời gian các bước</h2>
+          </div>
+          <div id="timeline-track" class="timeline-track">
+            <div class="timeline-line" aria-hidden="true"></div>
+            <ol class="timeline-steps" id="timeline-steps">
+              <li class="timeline-step is-active" data-step="1"><span class="step-dot"></span><span class="step-label">Bước 1</span></li>
+              <li class="timeline-step" data-step="2"><span class="step-dot"></span><span class="step-label">Bước 2</span></li>
+              <li class="timeline-step" data-step="3"><span class="step-dot"></span><span class="step-label">Bước 3</span></li>
+              <li class="timeline-step" data-step="4"><span class="step-dot"></span><span class="step-label">Bước 4</span></li>
+              <li class="timeline-step" data-step="5"><span class="step-dot"></span><span class="step-label">Bước 5</span></li>
+              <li class="timeline-step" data-step="6"><span class="step-dot"></span><span class="step-label">Bước 6</span></li>
+            </ol>
+          </div>
+        </section>
+
+        <!-- ===== PANEL: NHẬT KÝ ===== -->
+        <section id="panel-logger" class="tab-panel glass-panel">
+          <div class="panel-heading">
+            <h2 class="panel-title">Nhật ký thực thi</h2>
+            <button type="button" id="btn-download-log" class="btn btn-ghost btn-small" title="Tải nhật ký về máy">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 2v8M4.5 7 8 10.5 11.5 7"/><path d="M2.5 12.5h11"/></svg>
+              Tải nhật ký
+            </button>
+          </div>
+          <pre id="logger-output" class="logger-output" aria-live="polite">[00:00.00] Hệ thống khởi tạo trình mô phỏng.
+[00:00.00] Đang chờ dữ liệu đầu vào...
+[00:00.00] Sẵn sàng nhận lệnh từ bảng điều khiển.</pre>
+        </section>
+
+        <!-- ===== PANEL: KẾT QUẢ ===== -->
+        <section id="panel-result" class="tab-panel glass-panel">
+          <div class="panel-heading">
+            <h2 class="panel-title">Kết quả đầu ra</h2>
+            <button type="button" id="btn-copy-result" class="btn btn-ghost btn-small" title="Sao chép kết quả">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>
+              Sao chép
+            </button>
+          </div>
+          <div id="result-output" class="result-output">
+            <p class="result-placeholder">Kết quả sau khi mã hóa hoặc giải mã sẽ xuất hiện ở đây.</p>
+          </div>
+        </section>
+
+        <!-- ===== PANEL: GIẢI THÍCH ===== -->
+        <section id="panel-explanation" class="tab-panel glass-panel">
+          <div class="panel-heading">
+            <h2 class="panel-title">Giải thích thuật toán</h2>
+          </div>
+          <div id="explanation-content" class="explanation-content">
+            <p>Chọn một thuật toán ở bảng điều khiển để xem giải thích chi tiết về nguyên lý hoạt động, độ phức tạp tính toán và các ứng dụng thực tế của nó.</p>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <footer class="app-footer">
+    <p>Công cụ học tập trực quan hóa các thuật toán mật mã học.</p>
+  </footer>
+</div>
+
+<script src="js/app.js" defer></script>
+</body>
+</html>
