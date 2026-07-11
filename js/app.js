@@ -14,7 +14,7 @@
 import * as ui from './ui.js';
 import { Logger } from './logger.js';
 import { AnimationController, PlaybackState } from './animation.js';
-import { algorithmManager } from './algorithms.js';
+import { algorithmManager } from './algorithm.js';
 
 const refs = ui.getDomRefs();
 const logger = new Logger(refs.loggerOutput);
