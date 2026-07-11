@@ -236,6 +236,22 @@ function injectBitwiseVisualStyles() {
   document.head.appendChild(style);
 }
 
+/**
+ * Extract the hash digest from a result string formatted as
+ * `Label("input") = hexdigest` (used by MD5/SHA-256). Deliberately avoids
+ * regex-matching a fixed-length hex pattern anywhere in the string, since
+ * user input containing 32/64 consecutive hex-looking characters could
+ * false-match before the real digest is reached. The digest is always the
+ * trailing segment after the LAST "= ", so slicing from there is reliable
+ * no matter what the input contains.
+ */
+function extractDigestFromResult(resultText) {
+  const marker = '= ';
+  const idx = resultText.lastIndexOf(marker);
+  if (idx === -1) return resultText;
+  return resultText.slice(idx + marker.length).trim();
+}
+
 function escapeHtml(text) {
   return String(text ?? '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;',
@@ -406,9 +422,7 @@ function renderMd5RoundCard(step) {
 }
 
 function renderMd5DigestCard(step) {
-  const resultText = activeRun ? activeRun.result : '';
-  const match = resultText.match(/([0-9a-f]{32})/i);
-  const hex = match ? match[1] : resultText;
+  const hex = extractDigestFromResult(activeRun ? activeRun.result : '');
   return `
     <div class="bwv-card bwv-card--output">
       <div class="bwv-card-title">Digest MD5 (128-bit)</div>
@@ -457,9 +471,7 @@ function renderSha256CompressionCard(step) {
 }
 
 function renderSha256DigestCard(step) {
-  const resultText = activeRun ? activeRun.result : '';
-  const match = resultText.match(/([0-9a-f]{64})/i);
-  const hex = match ? match[1] : resultText;
+  const hex = extractDigestFromResult(activeRun ? activeRun.result : '');
   return `
     <div class="bwv-card bwv-card--output">
       <div class="bwv-card-title">Digest SHA-256 (256-bit)</div>
@@ -623,6 +635,7 @@ function bindEvents() {
 }
 
 function init() {
+  ui.initTabs(refs);
   ui.updateSpeedLabel(refs, Number(refs.speedSlider.value));
   animation.setSpeed(Number(refs.speedSlider.value));
   applyAlgorithmSelection();

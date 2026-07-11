@@ -260,14 +260,6 @@ algorithmManager.register('rsa', {
     'RSA là thuật toán mã hóa khóa công khai dựa trên độ khó của bài toán phân tích thừa số nguyên tố lớn. Mỗi bên có một cặp khóa: khóa công khai để mã hóa và khóa riêng tư để giải mã.',
 });
 
-algorithmManager.register('sha256', {
-  label: 'SHA-256',
-  requiresKey: false,
-  keyHint: '',
-  explanation:
-    'SHA-256 là một hàm băm mật mã học thuộc họ SHA-2, biến đổi dữ liệu đầu vào có độ dài bất kỳ thành một chuỗi băm cố định 256-bit. Hàm băm là một chiều, không thể đảo ngược để lấy lại dữ liệu gốc.',
-});
-
 algorithmManager.register('base64', {
   label: 'Base64',
   requiresKey: false,
