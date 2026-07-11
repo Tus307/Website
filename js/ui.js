@@ -189,6 +189,11 @@ export function initTabs(refs, onChange) {
       radioEl.setAttribute('aria-selected', String(isActive));
       radioEl.setAttribute('tabindex', isActive ? '0' : '-1');
       panelEl.setAttribute('aria-hidden', String(!isActive));
+      // The CSS sibling-selector rule (#tab-x:checked ~ #panel-x) never matches
+      // because the radios live under <nav class="tabs"> while the panels live
+      // under a separate <div class="tabs-wrap"> — they aren't DOM siblings.
+      // Control visibility directly here instead of relying on that CSS rule.
+      panelEl.style.display = isActive ? 'block' : 'none';
 
       if (isActive) {
         replayAnimation(panelEl, 'ui-fade-in');
