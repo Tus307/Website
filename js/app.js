@@ -1,22 +1,45 @@
-// app.js — Application entry point. Wires DOM events to the ui,
-// logger, animation, and algorithm-manager modules.
+// app.js — Application entry point. Wires the DOM to every other module:
+// ui.js (DOM refs, tabs, toasts, panels), logger.js (execution log),
+// animation.js (step playback), and algorithm.js (AlgorithmManager, which
+// hosts the real logic for Bitwise XOR/AND/OR, MD5, SHA-256, and Base64).
 //
-// Bitwise text-vs-text algorithms (XOR/AND/OR) are fully implemented via
-// algorithmManager (see algorithms.js). This file is responsible for:
-//   - Validating input and triggering algorithmManager.run(...)
-//   - Driving the AnimationController through the resulting step list
-//   - Rendering each step (ASCII → Binary → Bit-by-bit → Output) into
-//     #visualization-canvas, with the active bit highlighted
-// Other algorithms (caesar/vigenere/aes/rsa/sha256/base64) remain
-// unimplemented placeholders; attempting to run them surfaces a clear
-// Vietnamese error via toast instead of crashing.
+// Responsibilities:
+//   - Bind every control in the UI to a handler (algorithm/mode selection,
+//     text inputs, speed slider, playback buttons, log/result actions).
+//   - Validate input and trigger algorithmManager.run(...) exactly once per
+//     configuration (lazy, memoized in `activeRun` until inputs change).
+//   - Drive the AnimationController through the resulting step list.
+//   - Render each step into #visualization-canvas. Four families of step
+//     types are supported: Bitwise (ascii/binary/bit/output/notice),
+//     MD5 (md5-*), SHA-256 (sha256-*), and Base64 encode/decode (b64-*/b64d-*).
+// Caesar/Vigenère/AES/RSA remain unimplemented placeholders; attempting to
+// run them surfaces a clear Vietnamese error via toast instead of crashing.
 
-import * as ui from './ui.js';
+import {
+  getDomRefs,
+  initTabs,
+  setStatus,
+  updateProgress,
+  toggleSecondaryInput,
+  setAlgorithmTag,
+  updateSpeedLabel,
+  bindSpeedSlider,
+  highlightTimelineStep,
+  setExplanation,
+  setResult,
+  setButtonsDisabled,
+  copyResultToClipboard,
+  showToast,
+} from './ui.js';
 import { Logger } from './logger.js';
 import { AnimationController, PlaybackState } from './animation.js';
 import { algorithmManager } from './algorithm.js';
 
-const refs = ui.getDomRefs();
+/* =========================================================
+   BOOTSTRAP — wire the core modules together
+   ========================================================= */
+
+const refs = getDomRefs();
 const logger = new Logger(refs.loggerOutput);
 
 algorithmManager.attachLogger(logger);
@@ -26,8 +49,8 @@ let activeRun = null;
 
 const animation = new AnimationController({
   onStepChange: (step, total) => {
-    ui.updateProgress(refs, step, total);
-    ui.highlightTimelineStep(refs, step);
+    updateProgress(refs, step, total);
+    highlightTimelineStep(refs, step);
     renderVisualization(step);
   },
   onStateChange: (state) => {
@@ -56,10 +79,12 @@ const CANVAS_PLACEHOLDER =
 const RESULT_PLACEHOLDER =
   '<p class="result-placeholder">Kết quả sau khi mã hóa hoặc giải mã sẽ xuất hiện ở đây.</p>';
 
+/** Reflect the AnimationController's playback state in the status dot/label and buttons. */
 function reflectPlaybackState(state) {
-  ui.setStatus(refs, STATE_KEYS[state], STATE_LABELS[state]);
-  refs.btnPause.disabled = state !== PlaybackState.RUNNING;
-  refs.btnAutorun.disabled = state === PlaybackState.RUNNING;
+  setStatus(refs, STATE_KEYS[state], STATE_LABELS[state]);
+  const isRunning = state === PlaybackState.RUNNING;
+  setButtonsDisabled([refs.btnPause], !isRunning);
+  setButtonsDisabled([refs.btnAutorun], isRunning);
 }
 
 function currentMode() {
@@ -70,12 +95,22 @@ function applyAlgorithmSelection() {
   const meta = algorithmManager.get(refs.algorithmSelect.value);
   if (!meta) return;
 
-  ui.setAlgorithmTag(refs, meta.label);
-  ui.setExplanation(refs, meta.explanation);
-  ui.toggleSecondaryInput(refs, meta.requiresKey, meta.keyHint);
+  setAlgorithmTag(refs, meta.label);
+  setExplanation(refs, meta.explanation);
+  toggleSecondaryInput(refs, meta.requiresKey, meta.keyHint);
   logger.log(`Đã chọn thuật toán: ${meta.label}.`);
   resetRunState({ silent: true });
 }
+
+/**
+ * Bumped every time the loaded run is invalidated (reset, algorithm/mode
+ * change, input edit). ensureRunStarted() snapshots this before awaiting
+ * algorithmManager.run() and checks it again afterwards — if it changed
+ * while the (possibly async) execute() was in flight, the user has since
+ * moved on, so the result is discarded instead of resurrecting a run
+ * they already dismissed.
+ */
+let runGeneration = 0;
 
 /**
  * Clear whatever algorithm run is currently loaded (steps/result), reset
@@ -84,6 +119,7 @@ function applyAlgorithmSelection() {
  * the caller separately (see btnReset handler).
  */
 function resetRunState({ silent = false } = {}) {
+  runGeneration += 1;
   activeRun = null;
   animation.setTotalSteps(0);
   refs.visualizationCanvas.innerHTML = CANVAS_PLACEHOLDER;
@@ -94,9 +130,9 @@ function resetRunState({ silent = false } = {}) {
 /**
  * Lazily run the currently-selected algorithm against the current inputs
  * if it hasn't been run yet. Validates the key/second-text requirement
- * and surfaces any error as a toast + log entry rather than throwing.
+ * and surfaces any error as a toast rather than throwing.
  * Async because algorithmManager.run() may await a Promise-based execute()
- * (e.g. SHA-256 via Web Crypto's crypto.subtle.digest).
+ * (e.g. SHA-256/Base64-decode via Web Crypto or a thrown validation error).
  * @returns {Promise<boolean>} true if a run is loaded and ready to step through.
  */
 let runInFlight = false;
@@ -108,7 +144,7 @@ async function ensureRunStarted() {
   const id = refs.algorithmSelect.value;
   const meta = algorithmManager.get(id);
   if (!meta) {
-    ui.showToast('Không tìm thấy thuật toán được chọn.', 'error');
+    showToast('Không tìm thấy thuật toán được chọn.', 'error');
     return false;
   }
 
@@ -116,22 +152,26 @@ async function ensureRunStarted() {
   const key = refs.inputSecondary.value;
   const mode = currentMode();
 
-  if (meta.requiresKey && !key) {
-    ui.showToast(
-      `Thuật toán "${meta.label}" yêu cầu ${meta.keyHint || 'khóa/tham số thứ hai'}.`,
-      'error'
-    );
-    return false;
-  }
-
   if (!meta.isImplemented) {
-    ui.showToast(`Thuật toán "${meta.label}" chưa được triển khai logic thực thi.`, 'error');
+    showToast(`Thuật toán "${meta.label}" chưa được triển khai logic thực thi.`, 'error');
     return false;
   }
 
+  if (meta.requiresKey && !key) {
+    showToast(`Thuật toán "${meta.label}" yêu cầu ${meta.keyHint || 'khóa/tham số thứ hai'}.`, 'error');
+    return false;
+  }
+
+  const myGeneration = runGeneration;
   runInFlight = true;
   try {
     const { steps, result } = await algorithmManager.run(id, { mode, input, key });
+
+    if (myGeneration !== runGeneration) {
+      // Invalidated (reset / algorithm switch / input edit) while execute()
+      // was still pending — silently discard rather than resurrecting it.
+      return false;
+    }
 
     const binaryByChar = new Map();
     steps.forEach((step) => {
@@ -139,10 +179,22 @@ async function ensureRunStarted() {
     });
 
     activeRun = { id, mode, steps, result, binaryByChar };
-    ui.setResult(refs, result);
+    setResult(refs, result);
     return true;
   } catch (error) {
-    ui.showToast(error.message, 'error');
+    // algorithmManager.run() already calls animation.setTotalSteps(steps.length)
+    // right after generateSteps() succeeds, BEFORE calling execute() — so if
+    // execute() itself throws (e.g. malformed Base64 input reaching
+    // atob()), the progress bar/count would otherwise be left stuck showing
+    // a non-zero total for a run that never actually completed and that
+    // activeRun never got set for. Reset the playback/progress state too,
+    // not just the toast, so the UI accurately reflects "no run loaded".
+    // Only do this — and only surface the toast — if nothing else already
+    // invalidated/replaced this attempt in the meantime.
+    if (myGeneration === runGeneration) {
+      resetRunState({ silent: true });
+      showToast(error.message, 'error');
+    }
     return false;
   } finally {
     runInFlight = false;
@@ -151,17 +203,16 @@ async function ensureRunStarted() {
 
 /* =========================================================
    VISUALIZATION RENDERING
-   Renders the current step (ASCII / Binary / Bit-by-bit / Output)
-   into #visualization-canvas. Styling is injected once at runtime,
-   the same pattern ui.js already uses — style.css itself is never
-   touched.
+   Renders the current step into #visualization-canvas. Styling is
+   injected once at runtime (same pattern ui.js uses for toasts) —
+   style.css itself is never touched.
    ========================================================= */
 
-let bwvStylesInjected = false;
+let vizStylesInjected = false;
 
-function injectBitwiseVisualStyles() {
-  if (bwvStylesInjected) return;
-  bwvStylesInjected = true;
+function injectVisualizationStyles() {
+  if (vizStylesInjected) return;
+  vizStylesInjected = true;
 
   const style = document.createElement('style');
   style.setAttribute('data-source', 'app.js');
@@ -213,7 +264,7 @@ function injectBitwiseVisualStyles() {
       .bwv-bit-col{ transition:none; }
     }
 
-    /* ---- MD5 visualizer ---- */
+    /* ---- MD5 / SHA-256 visualizer ---- */
     .md5-block-list{ display:flex; flex-direction:column; gap:8px; max-width:420px; }
     .md5-block-row{ display:flex; gap:10px; align-items:baseline; }
     .md5-block-label{ font-size:11px; color: var(--text-tertiary,#5e616e); text-transform:uppercase; letter-spacing:.06em; min-width:52px; }
@@ -232,6 +283,33 @@ function injectBitwiseVisualStyles() {
     .md5-round-shifts{ font-family: var(--font-mono,monospace); font-size:12px; color: var(--accent-key,#e8b876); }
 
     .md5-digest-hex{ font-family: var(--font-mono,monospace); font-size:16px; letter-spacing:.08em; color: var(--success,#6ee7b7); word-break:break-all; text-align:center; padding:10px 16px; border-radius: var(--radius-md,10px); background: var(--surface-strong,rgba(255,255,255,.06)); border:1px solid rgba(110,231,183,.35); }
+
+    /* ---- Base64 visualizer ---- */
+    .b64-bytes-row{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+    .b64-byte-chip{ display:flex; flex-direction:column; align-items:center; gap:3px; padding:8px 12px; border-radius: var(--radius-sm,6px); border:1px solid var(--border-glass,rgba(255,255,255,.09)); background: var(--surface,rgba(255,255,255,.035)); min-width:64px; }
+    .b64-byte-label{ font-size:10px; text-transform:uppercase; letter-spacing:.06em; color: var(--text-tertiary,#5e616e); }
+    .b64-byte-val{ font-family: var(--font-mono,monospace); font-size:15px; color: var(--accent-cipher,#7c9eff); }
+    .b64-byte-char{ font-family: var(--font-mono,monospace); font-size:12px; color: var(--text-secondary,#9497a3); }
+
+    .b64-binary-row{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+    .b64-binary-chip{ font-family: var(--font-mono,monospace); font-size:14px; letter-spacing:.16em; padding:8px 12px; border-radius: var(--radius-sm,6px); background: var(--surface-strong,rgba(255,255,255,.06)); color: var(--text-primary,#e7e9ee); }
+
+    .b64-card-body-mono{ font-family: var(--font-mono,monospace); font-size:13px; letter-spacing:.1em; color: var(--text-primary,#e7e9ee); text-align:center; word-break:break-all; max-width:440px; }
+    .b64-zero-pad{ color: var(--accent-key,#e8b876); }
+
+    .b64-group-row{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+    .b64-group-chip{ font-family: var(--font-mono,monospace); font-size:13px; padding:6px 10px; border-radius: var(--radius-sm,6px); border:1px solid rgba(124,158,255,.35); color: var(--accent-cipher,#7c9eff); }
+
+    .b64-lookup-row{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+    .b64-lookup-item{ display:flex; align-items:center; gap:6px; padding:8px 12px; border-radius: var(--radius-sm,6px); border:1px solid var(--border-glass,rgba(255,255,255,.09)); background: var(--surface,rgba(255,255,255,.035)); font-family: var(--font-mono,monospace); font-size:13px; }
+    .b64-lookup-bits{ color: var(--text-secondary,#9497a3); }
+    .b64-lookup-arrow{ color: var(--text-tertiary,#5e616e); }
+    .b64-lookup-val{ color: var(--accent-key,#e8b876); }
+    .b64-lookup-char{ color: var(--success,#6ee7b7); font-weight:700; }
+
+    .b64-pad-badge{ margin-top:6px; font-family: var(--font-mono,monospace); font-size:12px; color: var(--accent-key,#e8b876); text-align:center; }
+
+    .b64-final-output{ font-family: var(--font-mono,monospace); font-size:16px; letter-spacing:.06em; color: var(--success,#6ee7b7); word-break:break-all; text-align:center; padding:10px 16px; border-radius: var(--radius-md,10px); background: var(--surface-strong,rgba(255,255,255,.06)); border:1px solid rgba(110,231,183,.35); }
   `;
   document.head.appendChild(style);
 }
@@ -262,14 +340,66 @@ function escapeHtml(text) {
   }[ch]));
 }
 
-function renderNoticeCard(step) {
+/* ---- Shared card-building helpers (used across all four algorithm families) ---- */
+
+/** Generic "title + description" info/warning card, used for input/padding/notice steps. */
+function renderNoticeCard(step, { title = 'Lưu ý', notice = false } = {}) {
   return `
-    <div class="bwv-card bwv-card--notice">
-      <div class="bwv-card-title">Lưu ý</div>
+    <div class="bwv-card${notice ? ' bwv-card--notice' : ''}">
+      <div class="bwv-card-title">${escapeHtml(title)}</div>
       <div class="bwv-card-body">${escapeHtml(step.description)}</div>
     </div>
   `;
 }
+
+/** Generic "title + description + highlighted final value" card, used for every digest/final-output step. */
+function renderOutputSummaryCard({ title, description, value, valueClassName }) {
+  return `
+    <div class="bwv-card bwv-card--output">
+      <div class="bwv-card-title">${escapeHtml(title)}</div>
+      <div class="bwv-card-body">${escapeHtml(description)}</div>
+      <div class="${valueClassName}">${escapeHtml(value)}</div>
+    </div>
+  `;
+}
+
+/** A single byte "chip" (decimal value, optional label, optional printable-char annotation). */
+function renderByteChip(byteValue, { label = '', showChar = true } = {}) {
+  const labelHtml = label ? `<span class="b64-byte-label">${escapeHtml(label)}</span>` : '';
+  const charHtml =
+    showChar && byteValue >= 32 && byteValue <= 126
+      ? `<span class="b64-byte-char">"${escapeHtml(String.fromCharCode(byteValue))}"</span>`
+      : '';
+  return `
+    <div class="b64-byte-chip">
+      ${labelHtml}
+      <span class="b64-byte-val">${byteValue}</span>
+      ${charHtml}
+    </div>
+  `;
+}
+
+/** A single "label: hex value" row, used for MD5 block hexes and SHA-256 schedule words. */
+function renderLabeledHexRow(label, hexValue) {
+  return `<div class="md5-block-row"><span class="md5-block-label">${escapeHtml(label)}</span><span class="md5-block-hex">${hexValue}</span></div>`;
+}
+
+/** A row of labeled 32-bit register chips, used for MD5 buffers and SHA-256 H0..H7. */
+function renderRegisterRow(entries) {
+  const cols = entries
+    .map(
+      ({ label, hex }, idx) => `
+      <div class="md5-reg md5-reg--${['a', 'b', 'c', 'd'][idx % 4]}">
+        <span class="md5-reg-label">${escapeHtml(label)}</span>
+        <span class="md5-reg-val">0x${hex.toUpperCase()}</span>
+      </div>
+    `
+    )
+    .join('');
+  return `<div class="md5-reg-row">${cols}</div>`;
+}
+
+/* ---- Bitwise (XOR/AND/OR) render helpers ---- */
 
 function renderAsciiCard(step) {
   return `
@@ -365,21 +495,9 @@ function renderOutputCard(step) {
 
 /* ---- MD5 render helpers ---- */
 
-function renderMd5NoticeCard(step, title) {
-  return `
-    <div class="bwv-card">
-      <div class="bwv-card-title">${escapeHtml(title)}</div>
-      <div class="bwv-card-body">${escapeHtml(step.description)}</div>
-    </div>
-  `;
-}
-
 function renderMd5BlocksCard(step) {
   const items = step.data.blockHexes
-    .map((hex, idx) => {
-      const grouped = hex.match(/.{1,8}/g).join(' ');
-      return `<div class="md5-block-row"><span class="md5-block-label">Khối ${idx + 1}</span><span class="md5-block-hex">${grouped}</span></div>`;
-    })
+    .map((hex, idx) => renderLabeledHexRow(`Khối ${idx + 1}`, hex.match(/.{1,8}/g).join(' ')))
     .join('');
   return `
     <div class="bwv-card">
@@ -390,21 +508,11 @@ function renderMd5BlocksCard(step) {
 }
 
 function renderMd5BuffersCard(step) {
-  const regs = ['A', 'B', 'C', 'D'];
-  const cols = regs
-    .map(
-      (r) => `
-      <div class="md5-reg md5-reg--${r.toLowerCase()}">
-        <span class="md5-reg-label">${r}</span>
-        <span class="md5-reg-val">0x${step.data[r].toUpperCase()}</span>
-      </div>
-    `
-    )
-    .join('');
+  const entries = ['A', 'B', 'C', 'D'].map((r) => ({ label: r, hex: step.data[r] }));
   return `
     <div class="bwv-card">
       <div class="bwv-card-title">Khởi tạo thanh ghi (buffer)</div>
-      <div class="md5-reg-row">${cols}</div>
+      ${renderRegisterRow(entries)}
     </div>
   `;
 }
@@ -421,26 +529,10 @@ function renderMd5RoundCard(step) {
   `;
 }
 
-function renderMd5DigestCard(step) {
-  const hex = extractDigestFromResult(activeRun ? activeRun.result : '');
-  return `
-    <div class="bwv-card bwv-card--output">
-      <div class="bwv-card-title">Digest MD5 (128-bit)</div>
-      <div class="bwv-card-body">${escapeHtml(step.description)}</div>
-      <div class="md5-digest-hex">${escapeHtml(hex)}</div>
-    </div>
-  `;
-}
-
 /* ---- SHA-256 render helpers ---- */
 
 function renderSha256ScheduleCard(step) {
-  const words = step.data.w0to15
-    .map(
-      (w, idx) =>
-        `<div class="md5-block-row"><span class="md5-block-label">W[${idx}]</span><span class="md5-block-hex">${w}</span></div>`
-    )
-    .join('');
+  const words = step.data.w0to15.map((w, idx) => renderLabeledHexRow(`W[${idx}]`, w)).join('');
   return `
     <div class="bwv-card">
       <div class="bwv-card-title">Lịch trình thông điệp — W[0..15]</div>
@@ -451,32 +543,128 @@ function renderSha256ScheduleCard(step) {
 }
 
 function renderSha256CompressionCard(step) {
-  const regs = step.data.hInit
-    .map(
-      (h, idx) => `
-      <div class="md5-reg md5-reg--${['a', 'b', 'c', 'd'][idx % 4]}">
-        <span class="md5-reg-label">H${idx}</span>
-        <span class="md5-reg-val">0x${h.toUpperCase()}</span>
-      </div>
-    `
-    )
-    .join('');
+  const entries = step.data.hInit.map((h, idx) => ({ label: `H${idx}`, hex: h }));
   return `
     <div class="bwv-card">
       <div class="bwv-card-title">Vòng nén (64 vòng)</div>
       <div class="bwv-card-body">${escapeHtml(step.description)}</div>
-      <div class="md5-reg-row">${regs}</div>
+      ${renderRegisterRow(entries)}
     </div>
   `;
 }
 
-function renderSha256DigestCard(step) {
-  const hex = extractDigestFromResult(activeRun ? activeRun.result : '');
+/* ---- Base64 render helpers (encode) ---- */
+
+function renderB64BytesCard(step) {
+  const items = step.data.bytes
+    .map((b, idx) => renderByteChip(b, { label: `Byte ${step.data.startIndex + idx + 1}` }))
+    .join('');
   return `
-    <div class="bwv-card bwv-card--output">
-      <div class="bwv-card-title">Digest SHA-256 (256-bit)</div>
-      <div class="bwv-card-body">${escapeHtml(step.description)}</div>
-      <div class="md5-digest-hex">${escapeHtml(hex)}</div>
+    <div class="bwv-card">
+      <div class="bwv-card-title">Khối ${step.chunkIndex + 1} — Byte / ASCII</div>
+      <div class="b64-bytes-row">${items}</div>
+    </div>
+  `;
+}
+
+function renderB64BinaryCard(step) {
+  const items = step.data.binaries.map((bin) => `<div class="b64-binary-chip">${bin}</div>`).join('');
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Khối ${step.chunkIndex + 1} — Nhị phân 8-bit</div>
+      <div class="b64-binary-row">${items}</div>
+    </div>
+  `;
+}
+
+function renderB64GroupCard(step) {
+  const groups = step.data.groups.map((g) => `<div class="b64-group-chip">${g}</div>`).join('');
+  const zeroNote =
+    step.data.zeroBitsAdded > 0
+      ? `<span class="b64-zero-pad">${'0'.repeat(step.data.zeroBitsAdded)}</span>`
+      : '';
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Khối ${step.chunkIndex + 1} — Nhóm 6-bit</div>
+      <div class="b64-card-body-mono">${step.data.bitString}${zeroNote}</div>
+      <div class="b64-group-row">${groups}</div>
+    </div>
+  `;
+}
+
+function renderB64LookupCard(step) {
+  const items = step.data.lookupChars
+    .map(
+      (l) => `
+      <div class="b64-lookup-item">
+        <span class="b64-lookup-bits">${l.bits}</span>
+        <span class="b64-lookup-arrow">→</span>
+        <span class="b64-lookup-val">${l.value}</span>
+        <span class="b64-lookup-arrow">→</span>
+        <span class="b64-lookup-char">"${escapeHtml(l.char)}"</span>
+      </div>
+    `
+    )
+    .join('');
+  const padBadge =
+    step.data.padCharsCount > 0
+      ? `<div class="b64-pad-badge">+ ${'='.repeat(step.data.padCharsCount)} (ký tự đệm)</div>`
+      : '';
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Khối ${step.chunkIndex + 1} — Tra bảng Base64</div>
+      <div class="b64-lookup-row">${items}</div>
+      ${padBadge}
+    </div>
+  `;
+}
+
+/* ---- Base64 render helpers (decode) ---- */
+
+function renderB64dLookupCard(step) {
+  const items = step.data.lookup
+    .map(
+      (l) => `
+      <div class="b64-lookup-item">
+        <span class="b64-lookup-char">"${escapeHtml(l.char)}"</span>
+        <span class="b64-lookup-arrow">→</span>
+        <span class="b64-lookup-val">${l.value}</span>
+        <span class="b64-lookup-arrow">→</span>
+        <span class="b64-lookup-bits">${l.bits}</span>
+      </div>
+    `
+    )
+    .join('');
+  const padBadge =
+    step.data.padCount > 0
+      ? `<div class="b64-pad-badge">bỏ qua ${step.data.padCount} ký tự đệm "="</div>`
+      : '';
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Nhóm ${step.chunkIndex + 1} — Tra chỉ số ngược</div>
+      <div class="b64-lookup-row">${items || '<span class="bwv-card-body">Không có ký tự hợp lệ</span>'}</div>
+      ${padBadge}
+    </div>
+  `;
+}
+
+function renderB64dRegroupCard(step) {
+  const bytesChips = step.data.chunkBytes.map((b) => renderByteChip(b, { showChar: false })).join('');
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Nhóm ${step.chunkIndex + 1} — Ghép lại thành byte 8-bit</div>
+      <div class="b64-card-body-mono">${step.data.bitString}</div>
+      <div class="b64-bytes-row">${bytesChips}</div>
+    </div>
+  `;
+}
+
+function renderB64dAsciiCard(step) {
+  const items = step.data.bytes.map((b) => renderByteChip(b)).join('');
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Nhóm ${step.chunkIndex + 1} — Byte → Ký tự</div>
+      <div class="b64-bytes-row">${items || '<span class="bwv-card-body">Không có byte nào</span>'}</div>
     </div>
   `;
 }
@@ -486,7 +674,7 @@ function renderSha256DigestCard(step) {
  * (0 or no active run ⇒ placeholder).
  */
 function renderVisualization(stepNumber) {
-  injectBitwiseVisualStyles();
+  injectVisualizationStyles();
 
   if (!activeRun || stepNumber <= 0) {
     refs.visualizationCanvas.innerHTML = CANVAS_PLACEHOLDER;
@@ -497,8 +685,9 @@ function renderVisualization(stepNumber) {
   if (!step) return;
 
   switch (step.type) {
+    // -- Bitwise (XOR/AND/OR) --
     case 'notice':
-      refs.visualizationCanvas.innerHTML = renderNoticeCard(step);
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { notice: true });
       break;
     case 'ascii':
       refs.visualizationCanvas.innerHTML = renderAsciiCard(step);
@@ -512,11 +701,13 @@ function renderVisualization(stepNumber) {
     case 'output':
       refs.visualizationCanvas.innerHTML = renderOutputCard(step);
       break;
+
+    // -- MD5 --
     case 'md5-input':
-      refs.visualizationCanvas.innerHTML = renderMd5NoticeCard(step, 'Đầu vào');
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đầu vào' });
       break;
     case 'md5-padding':
-      refs.visualizationCanvas.innerHTML = renderMd5NoticeCard(step, 'Đệm dữ liệu (padding)');
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đệm dữ liệu (padding)' });
       break;
     case 'md5-blocks':
       refs.visualizationCanvas.innerHTML = renderMd5BlocksCard(step);
@@ -528,13 +719,20 @@ function renderVisualization(stepNumber) {
       refs.visualizationCanvas.innerHTML = renderMd5RoundCard(step);
       break;
     case 'md5-digest':
-      refs.visualizationCanvas.innerHTML = renderMd5DigestCard(step);
+      refs.visualizationCanvas.innerHTML = renderOutputSummaryCard({
+        title: 'Digest MD5 (128-bit)',
+        description: step.description,
+        value: extractDigestFromResult(activeRun ? activeRun.result : ''),
+        valueClassName: 'md5-digest-hex',
+      });
       break;
+
+    // -- SHA-256 --
     case 'sha256-input':
-      refs.visualizationCanvas.innerHTML = renderMd5NoticeCard(step, 'Đầu vào');
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đầu vào' });
       break;
     case 'sha256-padding':
-      refs.visualizationCanvas.innerHTML = renderMd5NoticeCard(step, 'Đệm dữ liệu (padding)');
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đệm dữ liệu (padding)' });
       break;
     case 'sha256-blocks':
       refs.visualizationCanvas.innerHTML = renderMd5BlocksCard(step);
@@ -546,8 +744,67 @@ function renderVisualization(stepNumber) {
       refs.visualizationCanvas.innerHTML = renderSha256CompressionCard(step);
       break;
     case 'sha256-digest':
-      refs.visualizationCanvas.innerHTML = renderSha256DigestCard(step);
+      refs.visualizationCanvas.innerHTML = renderOutputSummaryCard({
+        title: 'Digest SHA-256 (256-bit)',
+        description: step.description,
+        value: extractDigestFromResult(activeRun ? activeRun.result : ''),
+        valueClassName: 'md5-digest-hex',
+      });
       break;
+
+    // -- Base64 encode --
+    case 'b64-input':
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đầu vào' });
+      break;
+    case 'b64-ascii':
+      refs.visualizationCanvas.innerHTML = renderB64BytesCard(step);
+      break;
+    case 'b64-binary':
+      refs.visualizationCanvas.innerHTML = renderB64BinaryCard(step);
+      break;
+    case 'b64-group6':
+      refs.visualizationCanvas.innerHTML = renderB64GroupCard(step);
+      break;
+    case 'b64-lookup':
+      refs.visualizationCanvas.innerHTML = renderB64LookupCard(step);
+      break;
+    case 'b64-padding':
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đệm (Padding)' });
+      break;
+    case 'b64-output':
+      refs.visualizationCanvas.innerHTML = renderOutputSummaryCard({
+        title: 'Kết quả Base64',
+        description: step.description,
+        value: step.data.result,
+        valueClassName: 'b64-final-output',
+      });
+      break;
+
+    // -- Base64 decode --
+    case 'b64d-input':
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đầu vào Base64' });
+      break;
+    case 'b64d-lookup':
+      refs.visualizationCanvas.innerHTML = renderB64dLookupCard(step);
+      break;
+    case 'b64d-regroup':
+      refs.visualizationCanvas.innerHTML = renderB64dRegroupCard(step);
+      break;
+    case 'b64d-ascii':
+      refs.visualizationCanvas.innerHTML = renderB64dAsciiCard(step);
+      break;
+    case 'b64d-padding':
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đệm (Padding)' });
+      break;
+    case 'b64d-output':
+      refs.visualizationCanvas.innerHTML = renderOutputSummaryCard({
+        title: 'Kết quả giải mã',
+        description: step.description,
+        value: step.data.resultText,
+        valueClassName: 'b64-final-output',
+      });
+      break;
+
     default:
       refs.visualizationCanvas.textContent = step.description || '';
   }
@@ -557,23 +814,30 @@ function renderVisualization(stepNumber) {
    EVENTS
    ========================================================= */
 
+/** Shared handler for the two mode radios — only the log message differs. */
+function handleModeChange(modeLabel) {
+  logger.log(`Chuyển sang chế độ ${modeLabel}.`);
+  resetRunState({ silent: true });
+}
+
+/** Shared handler for "Bước" and "Tiếp theo" — both advance one step, lazily starting the run first. */
+async function handleStepForward() {
+  if (!(await ensureRunStarted())) return;
+  animation.stepForward();
+}
+
+/** Editing either text field invalidates the currently loaded run so the next control click re-computes it. */
+function invalidateRun() {
+  resetRunState({ silent: true });
+}
+
 function bindEvents() {
   refs.algorithmSelect.addEventListener('change', applyAlgorithmSelection);
 
-  refs.modeEncrypt.addEventListener('change', () => {
-    logger.log('Chuyển sang chế độ mã hóa.');
-    resetRunState({ silent: true });
-  });
-  refs.modeDecrypt.addEventListener('change', () => {
-    logger.log('Chuyển sang chế độ giải mã.');
-    resetRunState({ silent: true });
-  });
+  refs.modeEncrypt.addEventListener('change', () => handleModeChange('mã hóa'));
+  refs.modeDecrypt.addEventListener('change', () => handleModeChange('giải mã'));
 
-  refs.speedSlider.addEventListener('input', (event) => {
-    const rawValue = Number(event.target.value);
-    ui.updateSpeedLabel(refs, rawValue);
-    animation.setSpeed(rawValue);
-  });
+  bindSpeedSlider(refs, (rawValue) => animation.setSpeed(rawValue));
 
   refs.btnSimulate.addEventListener('click', async () => {
     if (!(await ensureRunStarted())) return;
@@ -583,10 +847,8 @@ function bindEvents() {
     }
   });
 
-  refs.btnStep.addEventListener('click', async () => {
-    if (!(await ensureRunStarted())) return;
-    animation.stepForward();
-  });
+  refs.btnStep.addEventListener('click', handleStepForward);
+  refs.btnNext.addEventListener('click', handleStepForward);
 
   refs.btnAutorun.addEventListener('click', async () => {
     if (!(await ensureRunStarted())) return;
@@ -597,11 +859,6 @@ function bindEvents() {
   refs.btnPause.addEventListener('click', () => {
     animation.pauseAutorun();
     logger.log('Đã tạm dừng mô phỏng.');
-  });
-
-  refs.btnNext.addEventListener('click', async () => {
-    if (!(await ensureRunStarted())) return;
-    animation.stepForward();
   });
 
   refs.btnPrev.addEventListener('click', () => {
@@ -620,7 +877,7 @@ function bindEvents() {
   });
 
   refs.btnCopyResult.addEventListener('click', async () => {
-    const success = await ui.copyResultToClipboard(refs);
+    const success = await copyResultToClipboard(refs);
     logger.log(
       success
         ? 'Đã sao chép kết quả vào bộ nhớ tạm.'
@@ -628,15 +885,13 @@ function bindEvents() {
     );
   });
 
-  // Editing either text field invalidates the currently loaded run so the
-  // next control click re-computes steps against the fresh input.
-  refs.inputPrimary.addEventListener('input', () => resetRunState({ silent: true }));
-  refs.inputSecondary.addEventListener('input', () => resetRunState({ silent: true }));
+  refs.inputPrimary.addEventListener('input', invalidateRun);
+  refs.inputSecondary.addEventListener('input', invalidateRun);
 }
 
 function init() {
-  ui.initTabs(refs);
-  ui.updateSpeedLabel(refs, Number(refs.speedSlider.value));
+  initTabs(refs);
+  updateSpeedLabel(refs, Number(refs.speedSlider.value));
   animation.setSpeed(Number(refs.speedSlider.value));
   applyAlgorithmSelection();
   reflectPlaybackState(PlaybackState.IDLE);

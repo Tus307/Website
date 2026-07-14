@@ -260,13 +260,8 @@ algorithmManager.register('rsa', {
     'RSA là thuật toán mã hóa khóa công khai dựa trên độ khó của bài toán phân tích thừa số nguyên tố lớn. Mỗi bên có một cặp khóa: khóa công khai để mã hóa và khóa riêng tư để giải mã.',
 });
 
-algorithmManager.register('base64', {
-  label: 'Base64',
-  requiresKey: false,
-  keyHint: '',
-  explanation:
-    'Base64 là phương pháp mã hóa biểu diễn dữ liệu nhị phân dưới dạng chuỗi ký tự ASCII, thường dùng để truyền dữ liệu qua các kênh chỉ hỗ trợ văn bản. Đây KHÔNG phải là một phương pháp mã hóa bảo mật.',
-});
+// Lưu ý: 'base64' được đăng ký đầy đủ (generateSteps + execute) ở cuối file,
+// ngay sau phần SHA-256 — xem khối "BASE64 — Trình minh họa giáo dục".
 
 // ---------------------------------------------------------------------------
 // Phép toán Bit (XOR / AND / OR) — Text vs Text
@@ -292,6 +287,11 @@ function charCodeSafe(text, index) {
 /** Chuyển một mã ASCII (0–255) thành chuỗi nhị phân 8-bit, có đệm số 0 phía trước. */
 function toBinary8(code) {
   return code.toString(2).padStart(8, '0');
+}
+
+/** Chuyển một giá trị 0–63 thành chuỗi nhị phân 6-bit, có đệm số 0 phía trước. */
+function toBinary6(value) {
+  return value.toString(2).padStart(6, '0');
 }
 
 /**
@@ -804,4 +804,329 @@ algorithmManager.register('sha256', {
     'blockchain, kiểm tra toàn vẹn dữ liệu).',
   generateSteps: ({ input }) => computeSha256Steps(input ?? '').steps,
   execute: async ({ input }) => `SHA-256("${input ?? ''}") = ${await sha256Hex(input ?? '')}`,
+});
+
+// ---------------------------------------------------------------------------
+// BASE64 — Trình minh họa giáo dục (educational Base64 visualizer)
+//
+// Chiều mã hóa (encrypt): dữ liệu được mã hóa UTF-8 thành byte, chia thành
+// từng khối 3 byte (24 bit); mỗi khối được ghép thành một chuỗi bit liên tục,
+// chia thành 4 nhóm 6-bit (đệm thêm bit 0 nếu khối cuối thiếu byte), rồi tra
+// từng nhóm trong bảng 64 ký tự Base64. Nếu khối cuối thiếu byte, các vị trí
+// ký tự còn thiếu được điền bằng dấu "=".
+//
+// Chiều giải mã (decrypt): ngược lại — với mỗi nhóm 4 ký tự, tra chỉ số
+// ngược trong bảng (bỏ qua ký tự đệm "="), ghép các nhóm 6-bit thành một
+// chuỗi bit liên tục, rồi chia lại thành byte 8-bit (bỏ các bit dư cuối
+// cùng phát sinh từ phần đệm) trước khi giải mã UTF-8 thành văn bản.
+//
+// Theo yêu cầu: các bước trực quan hóa ở trên tự tính toán bằng logic thật
+// (không phải placeholder). API trình duyệt gốc (btoa/atob) CHỈ được dùng ở
+// bước execute() để lấy kết quả cuối cùng làm giá trị đối chiếu/xác thực,
+// tương tự cách SHA-256 dùng crypto.subtle cho digest cuối cùng.
+// ---------------------------------------------------------------------------
+
+const BASE64_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function printableCharSuffix(byteValue) {
+  return byteValue >= 32 && byteValue <= 126 ? ` ("${String.fromCharCode(byteValue)}")` : '';
+}
+
+/**
+ * Sinh danh sách bước trực quan hóa cho chiều MÃ HÓA Base64.
+ * @param {string} inputText
+ * @returns {{steps: Array, result: string}}
+ */
+function computeBase64EncodeSteps(inputText) {
+  const steps = [];
+  const bytes = Array.from(new TextEncoder().encode(inputText));
+  const byteLength = bytes.length;
+  const bitLength = byteLength * 8;
+
+  steps.push({
+    type: 'b64-input',
+    description: `Đầu vào: "${inputText}" — ${byteLength} byte (${bitLength} bit) sau khi mã hóa UTF-8.`,
+    data: { text: inputText, byteLength, bitLength },
+  });
+
+  if (byteLength === 0) {
+    steps.push({
+      type: 'b64-output',
+      description: 'Chuỗi đầu vào rỗng — kết quả Base64 cũng là chuỗi rỗng.',
+      data: { result: '' },
+    });
+    return { steps, result: '' };
+  }
+
+  let output = '';
+
+  for (let i = 0, chunkIndex = 0; i < byteLength; i += 3, chunkIndex += 1) {
+    const chunkBytes = bytes.slice(i, i + 3);
+
+    steps.push({
+      type: 'b64-ascii',
+      chunkIndex,
+      description:
+        `Khối ${chunkIndex + 1}: ${chunkBytes.length} byte — ` +
+        chunkBytes
+          .map((b, idx) => `byte ${i + idx + 1} = ${b}${printableCharSuffix(b)}`)
+          .join(', ') +
+        '.',
+      data: { bytes: chunkBytes, startIndex: i },
+    });
+
+    const binaries = chunkBytes.map(toBinary8);
+    steps.push({
+      type: 'b64-binary',
+      chunkIndex,
+      description: `Khối ${chunkIndex + 1}: chuyển mỗi byte sang nhị phân 8-bit — ${binaries.join(' ')}.`,
+      data: { binaries },
+    });
+
+    const bitString = binaries.join('');
+    const dataGroups = Math.ceil(bitString.length / 6);
+    const paddedBitString = bitString.padEnd(dataGroups * 6, '0');
+    const zeroBitsAdded = paddedBitString.length - bitString.length;
+    const groups = [];
+    for (let g = 0; g < dataGroups; g += 1) {
+      groups.push(paddedBitString.slice(g * 6, g * 6 + 6));
+    }
+
+    steps.push({
+      type: 'b64-group6',
+      chunkIndex,
+      description:
+        `Khối ${chunkIndex + 1}: ghép ${bitString.length} bit thành chuỗi liên tục` +
+        (zeroBitsAdded > 0 ? `, đệm thêm ${zeroBitsAdded} bit 0 để đủ nhóm 6-bit` : '') +
+        `, rồi chia thành ${dataGroups} nhóm 6-bit: ${groups.join(' ')}.`,
+      data: { bitString, paddedBitString, groups, zeroBitsAdded },
+    });
+
+    const lookupChars = groups.map((g) => {
+      const value = parseInt(g, 2);
+      return { bits: g, value, char: BASE64_ALPHABET[value] };
+    });
+    const padCharsCount = 4 - dataGroups;
+
+    steps.push({
+      type: 'b64-lookup',
+      chunkIndex,
+      description:
+        `Khối ${chunkIndex + 1}: tra bảng Base64 (64 ký tự A–Z, a–z, 0–9, +, /) — ` +
+        lookupChars.map((l) => `${l.bits} = ${l.value} → "${l.char}"`).join(', ') +
+        (padCharsCount > 0 ? `, thêm ${padCharsCount} ký tự đệm "=".` : '.'),
+      data: { lookupChars, padCharsCount },
+    });
+
+    if (padCharsCount > 0) {
+      steps.push({
+        type: 'b64-padding',
+        chunkIndex,
+        description:
+          `Khối ${chunkIndex + 1} chỉ có ${chunkBytes.length} byte (thay vì 3), nên chỉ tạo được ` +
+          `${dataGroups} ký tự Base64 thật; ${padCharsCount} vị trí còn lại trong nhóm 4 ký tự được ` +
+          'điền bằng dấu "=" để báo hiệu bên giải mã biết phần dữ liệu bị thiếu.',
+        data: { padCharsCount },
+      });
+    }
+
+    output += lookupChars.map((l) => l.char).join('') + '='.repeat(padCharsCount);
+  }
+
+  steps.push({
+    type: 'b64-output',
+    description: `Ghép tất cả các nhóm 4 ký tự lại theo đúng thứ tự: kết quả Base64 = "${output}".`,
+    data: { result: output },
+  });
+
+  return { steps, result: output };
+}
+
+/**
+ * Sinh danh sách bước trực quan hóa cho chiều GIẢI MÃ Base64.
+ * @param {string} inputText
+ * @returns {{steps: Array, bytes: number[], resultText: string}}
+ */
+function computeBase64DecodeSteps(inputText) {
+  const steps = [];
+  const cleaned = (inputText ?? '').replace(/\s+/g, '');
+  const length = cleaned.length;
+
+  steps.push({
+    type: 'b64d-input',
+    description: `Đầu vào Base64: "${cleaned}" — ${length} ký tự.`,
+    data: { text: cleaned, length },
+  });
+
+  if (length === 0) {
+    steps.push({
+      type: 'b64d-output',
+      description: 'Chuỗi Base64 rỗng — kết quả giải mã cũng là chuỗi rỗng.',
+      data: { resultText: '', byteCount: 0 },
+    });
+    return { steps, bytes: [], resultText: '' };
+  }
+
+  if (length % 4 !== 0) {
+    steps.push({
+      type: 'b64d-padding',
+      description:
+        `Cảnh báo: độ dài chuỗi Base64 (${length} ký tự) không chia hết cho 4 — chuỗi có thể bị cắt hoặc ` +
+        'sai định dạng. Vẫn tiếp tục xử lý theo từng nhóm 4 ký tự; nhóm cuối cùng có thể bị thiếu ký tự.',
+      data: {},
+    });
+  }
+
+  const outBytes = [];
+
+  for (let i = 0, chunkIndex = 0; i < length; i += 4, chunkIndex += 1) {
+    const quantum = cleaned.slice(i, i + 4);
+    const chars = quantum.split('');
+    const padCount = chars.filter((c) => c === '=').length;
+    const validChars = chars.filter((c) => c !== '=');
+
+    const lookup = validChars.map((c) => {
+      const value = BASE64_ALPHABET.indexOf(c);
+      const safeValue = value >= 0 ? value : 0;
+      return { char: c, value: safeValue, bits: toBinary6(safeValue), valid: value >= 0 };
+    });
+
+    steps.push({
+      type: 'b64d-lookup',
+      chunkIndex,
+      description:
+        `Nhóm ${chunkIndex + 1}: tra chỉ số ngược trong bảng Base64 — ` +
+        (lookup.length > 0
+          ? lookup
+              .map((l) => `"${l.char}" → ${l.value} = ${l.bits}${l.valid ? '' : ' (ký tự không hợp lệ)'}`)
+              .join(', ')
+          : 'không có ký tự hợp lệ nào') +
+        (padCount > 0 ? `; bỏ qua ${padCount} ký tự đệm "=".` : '.'),
+      data: { lookup, padCount },
+    });
+
+    const bitString = lookup.map((l) => l.bits).join('');
+    const fullByteCount = Math.floor(bitString.length / 8);
+    const usableBits = bitString.slice(0, fullByteCount * 8);
+    const discardedBits = bitString.length - usableBits.length;
+
+    const chunkBytes = [];
+    for (let b = 0; b < fullByteCount; b += 1) {
+      chunkBytes.push(parseInt(usableBits.slice(b * 8, b * 8 + 8), 2));
+    }
+
+    steps.push({
+      type: 'b64d-regroup',
+      chunkIndex,
+      description:
+        `Nhóm ${chunkIndex + 1}: ghép ${bitString.length} bit từ các ký tự hợp lệ, chia lại thành ` +
+        `${fullByteCount} byte 8-bit` +
+        (discardedBits > 0 ? ` (bỏ ${discardedBits} bit thừa ở cuối do phần đệm)` : '') +
+        '.',
+      data: { bitString, chunkBytes, discardedBits },
+    });
+
+    steps.push({
+      type: 'b64d-ascii',
+      chunkIndex,
+      description:
+        chunkBytes.length > 0
+          ? `Nhóm ${chunkIndex + 1}: giá trị byte thu được — ` +
+            chunkBytes
+              .map((b, idx) => `byte ${outBytes.length + idx + 1} = ${b}${printableCharSuffix(b)}`)
+              .join(', ') +
+            '.'
+          : `Nhóm ${chunkIndex + 1}: không tạo ra byte nào (toàn bộ là ký tự đệm).`,
+      data: { bytes: chunkBytes },
+    });
+
+    if (padCount > 0) {
+      steps.push({
+        type: 'b64d-padding',
+        chunkIndex,
+        description:
+          `Nhóm ${chunkIndex + 1} có ${padCount} ký tự đệm "=", nghĩa là khối gốc lúc mã hóa chỉ có ` +
+          `${chunkBytes.length} byte thay vì 3.`,
+        data: { padCount },
+      });
+    }
+
+    outBytes.push(...chunkBytes);
+  }
+
+  let resultText;
+  try {
+    resultText = new TextDecoder('utf-8', { fatal: false }).decode(Uint8Array.from(outBytes));
+  } catch (error) {
+    resultText = '';
+  }
+
+  steps.push({
+    type: 'b64d-output',
+    description: `Ghép ${outBytes.length} byte và giải mã UTF-8: kết quả = "${resultText}".`,
+    data: { resultText, byteCount: outBytes.length },
+  });
+
+  return { steps, bytes: outBytes, resultText };
+}
+
+/**
+ * Mã hóa Base64 bằng API gốc của trình duyệt (TextEncoder + btoa) — dùng để
+ * XÁC THỰC kết quả cuối cùng, KHÔNG dùng để sinh bước trực quan hóa.
+ * @param {string} text
+ * @returns {string}
+ */
+function nativeBase64Encode(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  return btoa(binary);
+}
+
+/**
+ * Giải mã Base64 bằng API gốc của trình duyệt (atob + TextDecoder) — dùng để
+ * XÁC THỰC kết quả cuối cùng, KHÔNG dùng để sinh bước trực quan hóa.
+ * @param {string} base64Text
+ * @returns {string}
+ * @throws nếu chuỗi Base64 không hợp lệ theo atob().
+ */
+function nativeBase64Decode(base64Text) {
+  const cleaned = (base64Text ?? '').replace(/\s+/g, '');
+  let binary;
+  try {
+    binary = atob(cleaned);
+  } catch (error) {
+    throw new Error('Chuỗi Base64 không hợp lệ — không thể giải mã.');
+  }
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+}
+
+algorithmManager.register('base64', {
+  label: 'Base64',
+  requiresKey: false,
+  keyHint: '',
+  explanation:
+    'Base64 là phương pháp biểu diễn dữ liệu nhị phân dưới dạng chuỗi ký tự ASCII an toàn để truyền qua ' +
+    'các kênh chỉ hỗ trợ văn bản. Khi mã hóa, dữ liệu được chia thành từng khối 3 byte (24 bit); mỗi khối ' +
+    'được ghép thành chuỗi bit liên tục rồi chia thành 4 nhóm 6-bit, mỗi nhóm (giá trị 0–63) được tra ' +
+    'trong bảng 64 ký tự (A–Z, a–z, 0–9, +, /). Nếu khối cuối thiếu byte, các vị trí ký tự còn thiếu được ' +
+    'điền bằng dấu "=". Khi giải mã, quá trình được thực hiện ngược lại: tra chỉ số ngược, ghép bit, rồi ' +
+    'chia lại thành byte 8-bit. Đây KHÔNG phải là phương pháp mã hóa bảo mật — bất kỳ ai cũng có thể giải ' +
+    'mã Base64 mà không cần khóa.',
+  generateSteps: ({ mode, input }) =>
+    mode === 'decrypt'
+      ? computeBase64DecodeSteps(input ?? '').steps
+      : computeBase64EncodeSteps(input ?? '').steps,
+  execute: ({ mode, input }) => {
+    if (mode === 'decrypt') {
+      const decoded = nativeBase64Decode(input ?? '');
+      return `Base64 Decode("${input ?? ''}") = ${decoded}`;
+    }
+    const encoded = nativeBase64Encode(input ?? '');
+    return `Base64 Encode("${input ?? ''}") = ${encoded}`;
+  },
 });
