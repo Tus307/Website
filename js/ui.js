@@ -124,6 +124,7 @@ export function getDomRefs() {
     algorithmSelect: qs('#algorithm-select'),
     modeEncrypt: qs('#mode-encrypt'),
     modeDecrypt: qs('#mode-decrypt'),
+    modeDecryptLabel: qs('label[for="mode-decrypt"]'),
 
     inputPrimary: qs('#input-primary'),
     inputSecondaryWrap: qs('#input-secondary-wrap'),
@@ -262,6 +263,30 @@ export function toggleSecondaryInput(refs, isVisible, hintText) {
   if (isVisible && wasHidden) {
     replayAnimation(refs.inputSecondaryWrap, 'ui-fade-in');
   }
+}
+
+/**
+ * Show or hide the "Giải mã" (decrypt) mode option depending on whether the
+ * currently selected algorithm actually supports decoding in this app.
+ * Reuses the existing `.is-hidden` utility class (already defined in
+ * style.css, already used by toggleSecondaryInput above) — no CSS changes
+ * needed. If decrypt is currently selected but must be hidden, falls back
+ * to encrypt so the app never ends up on a hidden, checked radio.
+ * @param {object} refs - result of getDomRefs()
+ * @param {boolean} isDecodable - whether the current algorithm supports decode.
+ * @returns {boolean} true if the mode was force-switched back to encrypt.
+ */
+export function toggleDecryptMode(refs, isDecodable) {
+  refs.modeDecrypt.classList.toggle('is-hidden', !isDecodable);
+  if (refs.modeDecryptLabel) {
+    refs.modeDecryptLabel.classList.toggle('is-hidden', !isDecodable);
+  }
+
+  if (!isDecodable && refs.modeDecrypt.checked) {
+    refs.modeEncrypt.checked = true;
+    return true;
+  }
+  return false;
 }
 
 /* =========================================================

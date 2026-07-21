@@ -11,10 +11,12 @@
 </head>
 <body>
 
+<!-- Nền hiệu ứng dòng mã nền (thuần CSS, chỉ mang tính trang trí) -->
 <div class="cipher-stream" aria-hidden="true"></div>
 
 <div class="app-shell">
 
+  <!-- ============ HEADER ============ -->
   <header id="app-header" class="app-header">
     <div class="header-brand">
       <span class="brand-mark" aria-hidden="true">
@@ -35,8 +37,10 @@
     </div>
   </header>
 
+  <!-- ============ MAIN LAYOUT ============ -->
   <div class="app-body">
 
+    <!-- ============ SIDEBAR: CẤU HÌNH & ĐIỀU KHIỂN ============ -->
     <aside id="control-panel" class="control-panel glass-panel" aria-label="Bảng điều khiển">
 
       <section class="control-section" id="section-algorithm">
@@ -44,14 +48,14 @@
         <label class="field-label" for="algorithm-select">Chọn thuật toán mã hóa</label>
         <div class="select-wrap">
           <select id="algorithm-select" class="select-input" name="algorithm">
-
+            <option value="caesar">Caesar Cipher — Mã hóa dịch chuyển</option>
+            <option value="vigenere">Vigenère Cipher — Mã hóa đa bảng</option>
             <option value="aes">AES — Mã hóa khối đối xứng</option>
             <option value="rsa">RSA — Mã hóa khóa công khai</option>
             <option value="sha256">SHA-256 — Hàm băm</option>
             <option value="base64">Base64 — Mã hóa biểu diễn</option>
             <option value="xor">XOR — Phép toán bit (Text vs Text)</option>
-            <option value="and">AND — Phép toán bit (Text vs Text)</option>
-            <option value="or">OR — Phép toán bit (Text vs Text)</option>
+            <option value="hill">Hill Cipher — Mã hóa ma trận (2x2)</option>
             <option value="md5">MD5 — Hàm băm (minh họa)</option>
           </select>
           <svg class="select-caret" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -132,8 +136,10 @@
 
     </aside>
 
+    <!-- ============ MAIN CONTENT ============ -->
     <main id="main-content" class="main-content">
 
+      <!-- Thanh tiến trình -->
       <div id="progress-section" class="progress-section glass-panel">
         <div class="progress-meta">
           <span class="progress-label" id="progress-label">Tiến trình mô phỏng</span>
@@ -144,6 +150,7 @@
         </div>
       </div>
 
+      <!-- Tabs -->
       <div class="tabs-wrap">
         <nav class="tabs" id="main-tabs" role="tablist" aria-label="Chuyển đổi khung nhìn">
           <input type="radio" name="tabs" id="tab-visualization" class="tab-radio" checked>
@@ -177,6 +184,7 @@
           </label>
         </nav>
 
+        <!-- ===== PANEL: TRỰC QUAN HÓA ===== -->
         <section id="panel-visualization" class="tab-panel glass-panel">
           <div class="panel-heading">
             <h2 class="panel-title">Trực quan hóa thuật toán</h2>
@@ -187,6 +195,7 @@
           </div>
         </section>
 
+        <!-- ===== PANEL: DÒNG THỜI GIAN ===== -->
         <section id="panel-timeline" class="tab-panel glass-panel">
           <div class="panel-heading">
             <h2 class="panel-title">Dòng thời gian các bước</h2>
@@ -204,6 +213,7 @@
           </div>
         </section>
 
+        <!-- ===== PANEL: NHẬT KÝ ===== -->
         <section id="panel-logger" class="tab-panel glass-panel">
           <div class="panel-heading">
             <h2 class="panel-title">Nhật ký thực thi</h2>
@@ -217,6 +227,7 @@
 [00:00.00] Sẵn sàng nhận lệnh từ bảng điều khiển.</pre>
         </section>
 
+        <!-- ===== PANEL: KẾT QUẢ ===== -->
         <section id="panel-result" class="tab-panel glass-panel">
           <div class="panel-heading">
             <h2 class="panel-title">Kết quả đầu ra</h2>
@@ -230,6 +241,7 @@
           </div>
         </section>
 
+        <!-- ===== PANEL: GIẢI THÍCH ===== -->
         <section id="panel-explanation" class="tab-panel glass-panel">
           <div class="panel-heading">
             <h2 class="panel-title">Giải thích thuật toán</h2>

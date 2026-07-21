@@ -21,6 +21,7 @@ import {
   setStatus,
   updateProgress,
   toggleSecondaryInput,
+  toggleDecryptMode,
   setAlgorithmTag,
   updateSpeedLabel,
   bindSpeedSlider,
@@ -98,6 +99,12 @@ function applyAlgorithmSelection() {
   setAlgorithmTag(refs, meta.label);
   setExplanation(refs, meta.explanation);
   toggleSecondaryInput(refs, meta.requiresKey, meta.keyHint);
+
+  const forcedToEncrypt = toggleDecryptMode(refs, meta.decodable);
+  if (forcedToEncrypt) {
+    logger.log(`Thuật toán "${meta.label}" chưa hỗ trợ giải mã trong ứng dụng này — chuyển về chế độ mã hóa.`);
+  }
+
   logger.log(`Đã chọn thuật toán: ${meta.label}.`);
   resetRunState({ silent: true });
 }
@@ -310,6 +317,12 @@ function injectVisualizationStyles() {
     .b64-pad-badge{ margin-top:6px; font-family: var(--font-mono,monospace); font-size:12px; color: var(--accent-key,#e8b876); text-align:center; }
 
     .b64-final-output{ font-family: var(--font-mono,monospace); font-size:16px; letter-spacing:.06em; color: var(--success,#6ee7b7); word-break:break-all; text-align:center; padding:10px 16px; border-radius: var(--radius-md,10px); background: var(--surface-strong,rgba(255,255,255,.06)); border:1px solid rgba(110,231,183,.35); }
+
+    /* ---- Hill Cipher visualizer ---- */
+    .hill-matrix-wrap{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+    .hill-matrix-label{ font-size:11px; color: var(--text-tertiary,#5e616e); text-transform:uppercase; letter-spacing:.06em; }
+    .hill-matrix{ display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; }
+    .hill-matrix-cell{ display:flex; align-items:center; justify-content:center; min-width:48px; min-height:48px; border-radius: var(--radius-sm,6px); border:1px solid var(--border-glass,rgba(255,255,255,.09)); background: var(--surface,rgba(255,255,255,.035)); font-family: var(--font-mono,monospace); font-size:18px; color: var(--accent-cipher,#7c9eff); }
   `;
   document.head.appendChild(style);
 }
@@ -399,7 +412,7 @@ function renderRegisterRow(entries) {
   return `<div class="md5-reg-row">${cols}</div>`;
 }
 
-/* ---- Bitwise (XOR/AND/OR) render helpers ---- */
+/* ---- Bitwise (XOR) render helpers ---- */
 
 function renderAsciiCard(step) {
   return `
@@ -488,6 +501,84 @@ function renderOutputCard(step) {
         <span class="bwv-output-arrow">→</span>
         <span class="bwv-output-dec">${step.resultByte}</span>
         <span class="bwv-output-hex">0x${step.resultHex}</span>
+      </div>
+    </div>
+  `;
+}
+
+/* ---- Hill Cipher render helpers ---- */
+
+/** A compact 2x2 matrix grid (e.g. the key matrix K or its inverse K⁻¹). */
+function renderHillMatrix(label, matrix) {
+  const cells = matrix
+    .flat()
+    .map((v) => `<div class="hill-matrix-cell">${v}</div>`)
+    .join('');
+  return `
+    <div class="hill-matrix-wrap">
+      <span class="hill-matrix-label">${escapeHtml(label)}</span>
+      <div class="hill-matrix">${cells}</div>
+    </div>
+  `;
+}
+
+function renderHillKeyCard(step) {
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Ma trận khóa K</div>
+      <div class="bwv-card-body">${escapeHtml(step.description)}</div>
+      ${renderHillMatrix('K', step.data.matrix)}
+    </div>
+  `;
+}
+
+function renderHillKeyInverseCard(step) {
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Ma trận nghịch đảo K⁻¹</div>
+      <div class="bwv-card-body">${escapeHtml(step.description)}</div>
+      ${renderHillMatrix('K⁻¹', step.data.inverse)}
+    </div>
+  `;
+}
+
+function renderHillPairLettersCard(step) {
+  const { ch1, ch2, p1, p2 } = step.data;
+  return `
+    <div class="bwv-card">
+      <div class="bwv-card-title">Cặp ${step.pairIndex + 1} — Chữ cái → Số</div>
+      <div class="bwv-pair">
+        <div class="bwv-slot bwv-slot--a">
+          <span class="bwv-slot-label">Ký tự 1</span>
+          <span class="bwv-slot-char">${escapeHtml(ch1)}</span>
+          <span class="bwv-slot-code">= ${p1}</span>
+        </div>
+        <div class="bwv-slot bwv-slot--b">
+          <span class="bwv-slot-label">Ký tự 2</span>
+          <span class="bwv-slot-char">${escapeHtml(ch2)}</span>
+          <span class="bwv-slot-code">= ${p2}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderHillPairOutputCard(step) {
+  const { r1, r2, outCh1, outCh2 } = step.data;
+  return `
+    <div class="bwv-card bwv-card--output">
+      <div class="bwv-card-title">Cặp ${step.pairIndex + 1} — Kết quả</div>
+      <div class="bwv-pair">
+        <div class="bwv-slot bwv-slot--a">
+          <span class="bwv-slot-label">Số → Chữ</span>
+          <span class="bwv-slot-char">${escapeHtml(outCh1)}</span>
+          <span class="bwv-slot-code">= ${r1}</span>
+        </div>
+        <div class="bwv-slot bwv-slot--b">
+          <span class="bwv-slot-label">Số → Chữ</span>
+          <span class="bwv-slot-char">${escapeHtml(outCh2)}</span>
+          <span class="bwv-slot-code">= ${r2}</span>
+        </div>
       </div>
     </div>
   `;
@@ -700,6 +791,39 @@ function renderVisualization(stepNumber) {
       break;
     case 'output':
       refs.visualizationCanvas.innerHTML = renderOutputCard(step);
+      break;
+
+    // -- Hill Cipher --
+    case 'hill-input':
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { title: 'Đầu vào' });
+      break;
+    case 'hill-key':
+      refs.visualizationCanvas.innerHTML = renderHillKeyCard(step);
+      break;
+    case 'hill-key-inverse':
+      refs.visualizationCanvas.innerHTML = renderHillKeyInverseCard(step);
+      break;
+    case 'hill-notice':
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, { notice: true });
+      break;
+    case 'hill-pair-letters':
+      refs.visualizationCanvas.innerHTML = renderHillPairLettersCard(step);
+      break;
+    case 'hill-pair-multiply':
+      refs.visualizationCanvas.innerHTML = renderNoticeCard(step, {
+        title: `Cặp ${step.pairIndex + 1} — Nhân ma trận (mod 26)`,
+      });
+      break;
+    case 'hill-pair-output':
+      refs.visualizationCanvas.innerHTML = renderHillPairOutputCard(step);
+      break;
+    case 'hill-output':
+      refs.visualizationCanvas.innerHTML = renderOutputSummaryCard({
+        title: 'Kết quả Hill Cipher',
+        description: step.description,
+        value: step.data.result,
+        valueClassName: 'b64-final-output',
+      });
       break;
 
     // -- MD5 --

@@ -21,6 +21,9 @@
  * @property {boolean} [requiresKey] - Thuật toán có cần khóa/tham số phụ hay không.
  * @property {string} [keyHint] - Gợi ý hiển thị cho ô nhập khóa.
  * @property {string} [explanation] - Nội dung giải thích nguyên lý hoạt động.
+ * @property {boolean} [decodable] - Thuật toán có hỗ trợ chế độ "Giải mã" thật sự trong ứng dụng
+ *   này hay không (mặc định false). Chỉ true cho các thuật toán có phép nghịch đảo đã triển khai
+ *   (XOR, Hill Cipher, Base64) — dùng để ẩn/hiện nút "Giải mã" trên giao diện.
  * @property {(ctx: {mode: string, input: string, key: string}) => Array} [generateSteps]
  *   Hàm sinh danh sách các bước trực quan hóa. Chưa được triển khai cho các
  *   thuật toán hiện tại.
@@ -76,6 +79,7 @@ export class AlgorithmManager {
       requiresKey: Boolean(definition.requiresKey),
       keyHint: definition.keyHint ?? '',
       explanation: definition.explanation ?? 'Chưa có giải thích cho thuật toán này.',
+      decodable: Boolean(definition.decodable),
       generateSteps: typeof definition.generateSteps === 'function' ? definition.generateSteps : null,
       execute: typeof definition.execute === 'function' ? definition.execute : null,
     };
@@ -264,19 +268,23 @@ algorithmManager.register('rsa', {
 // ngay sau phần SHA-256 — xem khối "BASE64 — Trình minh họa giáo dục".
 
 // ---------------------------------------------------------------------------
-// Phép toán Bit (XOR / AND / OR) — Text vs Text
+// Phép toán Bit XOR — Text vs Text
 //
-// Mỗi thuật toán so sánh hai văn bản (A = văn bản đầu vào chính, B = văn bản
-// thứ hai nhập ở ô "khóa/tham số") theo từng ký tự:
-//   ASCII → Nhị phân 8-bit → So sánh từng bit → Byte kết quả
-// Nếu hai văn bản không cùng độ dài, ký tự thiếu được coi như mã ASCII 0 (NUL)
-// và một bước cảnh báo được chèn vào đầu danh sách bước.
+// So sánh hai văn bản (A = văn bản đầu vào chính, B = văn bản thứ hai nhập ở
+// ô "khóa/tham số") theo từng ký tự: ASCII → Nhị phân 8-bit → So sánh từng
+// bit → Byte kết quả. Nếu hai văn bản không cùng độ dài, ký tự thiếu được
+// coi như mã ASCII 0 (NUL) và một bước cảnh báo được chèn vào đầu danh sách
+// bước.
+//
+// CHỈ giữ lại XOR — AND và OR đã bị loại bỏ vì chúng KHÔNG khả nghịch: biết
+// kết quả AND(a,b) hoặc OR(a,b) và một trong hai toán hạng không đủ để suy
+// ngược ra toán hạng còn lại một cách chắc chắn (thông tin bị mất ở những
+// bit mà cả hai đầu vào giống nhau). XOR thì khác — nó tự nghịch đảo
+// (A XOR B XOR B = A), nên cùng một phép toán XOR áp dụng lại là "giải mã".
 // ---------------------------------------------------------------------------
 
 const BIT_OPS = Object.freeze({
   xor: { label: 'XOR', fn: (a, b) => a ^ b, isActive: (a, b) => a !== b },
-  and: { label: 'AND', fn: (a, b) => a & b, isActive: (a, b) => a === 1 && b === 1 },
-  or: { label: 'OR', fn: (a, b) => a | b, isActive: (a, b) => a === 1 || b === 1 },
 });
 
 /** Lấy mã ASCII (0–255) của ký tự tại vị trí index; trả 0 nếu vượt quá độ dài chuỗi. */
@@ -297,7 +305,7 @@ function toBinary6(value) {
 /**
  * Sinh toàn bộ danh sách bước trực quan hóa cho một phép toán bit, cùng danh
  * sách byte kết quả tương ứng.
- * @param {'xor'|'and'|'or'} opId
+ * @param {'xor'} opId
  * @param {string} textA
  * @param {string} textB
  * @returns {{steps: Array, resultBytes: number[]}}
@@ -414,18 +422,269 @@ function registerBitwiseAlgorithm(id) {
   algorithmManager.register(id, {
     label: `${op.label} (Text vs Text)`,
     requiresKey: true,
+    decodable: true,
     keyHint: 'Nhập văn bản thứ hai (Text B) để so sánh từng bit với văn bản đầu vào (Text A).',
     explanation:
       `Phép toán bit ${op.label} so sánh từng bit tương ứng của hai văn bản: mỗi ký tự được chuyển ` +
       `sang mã ASCII rồi sang nhị phân 8-bit, sau đó thực hiện ${op.label} trên từng cặp bit để tạo ra ` +
       'byte kết quả. Quá trình được trực quan hóa qua 4 giai đoạn: ASCII → Nhị phân → So sánh từng bit → ' +
-      'Byte kết quả. Nếu hai văn bản có độ dài khác nhau, phần thiếu được coi như mã 0 (NUL).',
+      'Byte kết quả. Nếu hai văn bản có độ dài khác nhau, phần thiếu được coi như mã 0 (NUL). XOR tự ' +
+      'nghịch đảo (A XOR B XOR B = A) nên áp dụng lại đúng phép XOR với cùng Text B chính là "giải mã".',
     generateSteps: ({ input, key }) => computeBitwiseSteps(id, input ?? '', key ?? '').steps,
     execute: ({ input, key }) => formatBitwiseResult(computeBitwiseSteps(id, input ?? '', key ?? '').resultBytes),
   });
 }
 
-['xor', 'and', 'or'].forEach(registerBitwiseAlgorithm);
+['xor'].forEach(registerBitwiseAlgorithm);
+
+// ---------------------------------------------------------------------------
+// HILL CIPHER (2x2) — Trình minh họa giáo dục (educational Hill Cipher visualizer)
+//
+// Mã hóa khối cổ điển dựa trên đại số tuyến tính trên Z26 (modulo 26).
+// Khóa là một chuỗi 4 chữ cái tạo thành ma trận 2x2 K (mỗi chữ cái → số theo
+// A=0,...,Z=25, xếp theo hàng): K = [[k00, k01], [k10, k11]].
+//
+// Mã hóa: văn bản được lọc chỉ giữ chữ cái A-Z, đệm thêm "X" nếu số lẻ, rồi
+// chia thành từng cặp ký tự (p1, p2). Mỗi cặp được nhân với K theo modulo 26:
+//   [c1, c2] = K × [p1, p2] (mod 26)
+//
+// Giải mã: cần ma trận nghịch đảo K⁻¹ (mod 26), chỉ tồn tại khi định thức
+// det(K) nguyên tố cùng nhau với 26 (ƯCLN(det, 26) = 1) — đây chính là điều
+// kiện để một khóa Hill Cipher "khả nghịch" (decodable). Nếu không thỏa,
+// thuật toán từ chối ngay từ generateSteps() với thông báo lỗi rõ ràng,
+// TRƯỚC khi AnimationController nhận bất kỳ bước nào — tránh để lại trạng
+// thái tiến trình "lửng lơ" (steps đã set nhưng không có activeRun tương ứng).
+// Khi đã có K⁻¹, mỗi cặp ký tự mật mã được nhân với K⁻¹ để khôi phục [p1, p2].
+// ---------------------------------------------------------------------------
+
+/** Modulo luôn trả về số không âm (khác với toán tử % gốc của JS với số âm). */
+function hillMod(n, m) {
+  return ((n % m) + m) % m;
+}
+
+/** Tìm nghịch đảo modulo của a theo m (m = 26, nhỏ nên duyệt tuyến tính là đủ nhanh). Trả về null nếu không tồn tại. */
+function hillModInverse(a, m) {
+  const aMod = hillMod(a, m);
+  for (let x = 1; x < m; x += 1) {
+    if (hillMod(aMod * x, m) === 1) return x;
+  }
+  return null;
+}
+
+/** Chuyển khóa dạng chuỗi (>= 4 chữ cái) thành ma trận 2x2 số nguyên 0–25. */
+function parseHillKey(keyText) {
+  const letters = (keyText ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (letters.length < 4) {
+    throw new Error(
+      'Khóa Hill Cipher cần ít nhất 4 chữ cái (A-Z) để tạo ma trận khóa 2x2, ví dụ: "HILL".'
+    );
+  }
+  const keyLetters = letters.slice(0, 4);
+  const nums = keyLetters.split('').map((ch) => ch.charCodeAt(0) - 65);
+  const matrix = [
+    [nums[0], nums[1]],
+    [nums[2], nums[3]],
+  ];
+  return { keyLetters, matrix };
+}
+
+/** Định thức của ma trận 2x2, rút gọn theo modulo 26. */
+function hillDeterminant(matrix) {
+  const [[a, b], [c, d]] = matrix;
+  return hillMod(a * d - b * c, 26);
+}
+
+/**
+ * Tính ma trận nghịch đảo (mod 26) của ma trận khóa 2x2.
+ * @throws nếu định thức không có nghịch đảo modulo (ƯCLN(det, 26) ≠ 1).
+ */
+function hillInverseMatrix(matrix) {
+  const det = hillDeterminant(matrix);
+  const detInv = hillModInverse(det, 26);
+  if (detInv === null) {
+    throw new Error(
+      `Ma trận khóa không khả nghịch theo modulo 26 (định thức = ${det}, ƯCLN(${det}, 26) ≠ 1). ` +
+      'Hãy chọn khóa khác sao cho định thức nguyên tố cùng nhau với 26 (vd: "HILL", "TEXT").'
+    );
+  }
+  const [[a, b], [c, d]] = matrix;
+  // Ma trận phụ hợp (adjugate) của ma trận 2x2 [[a,b],[c,d]] là [[d,-b],[-c,a]].
+  const adjugate = [
+    [d, hillMod(-b, 26)],
+    [hillMod(-c, 26), a],
+  ];
+  const inverse = adjugate.map((row) => row.map((v) => hillMod(v * detInv, 26)));
+  return { det, detInv, inverse };
+}
+
+function hillLetterToNum(ch) {
+  return ch.charCodeAt(0) - 65;
+}
+
+function hillNumToLetter(n) {
+  return String.fromCharCode(hillMod(n, 26) + 65);
+}
+
+/**
+ * Sinh danh sách bước trực quan hóa + kết quả cuối cùng cho Hill Cipher,
+ * dùng chung cho cả hai chiều mã hóa/giải mã (khác nhau ở ma trận sử dụng:
+ * K khi mã hóa, K⁻¹ khi giải mã).
+ * @param {'encrypt'|'decrypt'} mode
+ * @param {string} inputText
+ * @param {string} keyText
+ * @returns {{steps: Array, result: string}}
+ * @throws nếu khóa không hợp lệ hoặc không khả nghịch (validate ngay từ đầu,
+ *   trước khi push bất kỳ step nào, cho cả hai chiều — một khóa Hill Cipher
+ *   hợp lệ luôns phải khả nghịch để có thể dùng lại cho chiều ngược lại).
+ */
+function computeHillSteps(mode, inputText, keyText) {
+  const { keyLetters, matrix: keyMatrix } = parseHillKey(keyText);
+  const det = hillDeterminant(keyMatrix);
+  const detInv = hillModInverse(det, 26);
+  if (detInv === null) {
+    throw new Error(
+      `Khóa "${keyLetters}" tạo ra ma trận không khả nghịch theo modulo 26 (định thức = ${det}). ` +
+      'Hãy chọn khóa khác sao cho định thức nguyên tố cùng nhau với 26 (vd: "HILL", "TEXT").'
+    );
+  }
+
+  const steps = [];
+  const actionLabel = mode === 'decrypt' ? 'giải mã' : 'mã hóa';
+
+  steps.push({
+    type: 'hill-input',
+    description: `Đầu vào (${actionLabel}): "${inputText}".`,
+    data: { text: inputText, mode },
+  });
+
+  steps.push({
+    type: 'hill-key',
+    description:
+      `Khóa "${keyLetters}" → ma trận 2x2 K = [[${keyMatrix[0][0]}, ${keyMatrix[0][1]}], ` +
+      `[${keyMatrix[1][0]}, ${keyMatrix[1][1]}]] (mỗi chữ cái → số theo A=0,...,Z=25, xếp theo hàng). ` +
+      `Định thức det(K) mod 26 = ${det} — khả nghịch vì ƯCLN(${det}, 26) = 1.`,
+    data: { keyLetters, matrix: keyMatrix, det },
+  });
+
+  let workingMatrix = keyMatrix;
+  if (mode === 'decrypt') {
+    const { inverse } = hillInverseMatrix(keyMatrix);
+    workingMatrix = inverse;
+    steps.push({
+      type: 'hill-key-inverse',
+      description:
+        `Giải mã cần ma trận nghịch đảo K⁻¹ (mod 26): nghịch đảo modulo của định thức ${det} là ${detInv} ` +
+        `(vì ${det}×${detInv} mod 26 = 1). Nhân định thức nghịch đảo với ma trận phụ hợp (adjugate) của K, ` +
+        `ta được K⁻¹ = [[${inverse[0][0]}, ${inverse[0][1]}], [${inverse[1][0]}, ${inverse[1][1]}]] — ` +
+        'dùng K⁻¹ thay cho K khi nhân với từng cặp ký tự bên dưới.',
+      data: { det, detInv, inverse },
+    });
+  }
+
+  const upper = (inputText ?? '').toUpperCase();
+  const letters = upper.replace(/[^A-Z]/g, '');
+  const removedCount = upper.length - letters.length;
+
+  if (removedCount > 0) {
+    steps.push({
+      type: 'hill-notice',
+      description:
+        `Bỏ qua ${removedCount} ký tự không phải chữ cái A-Z (khoảng trắng, dấu câu, số...) — ` +
+        'Hill Cipher cổ điển chỉ xử lý 26 chữ cái trong bảng chữ cái tiếng Anh.',
+      data: { removedCount },
+    });
+  }
+
+  if (letters.length === 0) {
+    steps.push({
+      type: 'hill-output',
+      description: 'Không còn chữ cái A-Z nào sau khi lọc — không có gì để xử lý.',
+      data: { result: '' },
+    });
+    return { steps, result: '' };
+  }
+
+  let workingLetters = letters;
+  if (workingLetters.length % 2 !== 0) {
+    workingLetters += 'X';
+    steps.push({
+      type: 'hill-notice',
+      description:
+        `Số chữ cái là số lẻ (${letters.length}) — thêm 1 ký tự đệm "X" vào cuối để chia hết cho 2 ` +
+        '(Hill Cipher 2x2 xử lý dữ liệu theo từng cặp ký tự một lúc).',
+      data: { padded: true },
+    });
+  }
+
+  let output = '';
+  for (let i = 0, pairIndex = 0; i < workingLetters.length; i += 2, pairIndex += 1) {
+    const ch1 = workingLetters[i];
+    const ch2 = workingLetters[i + 1];
+    const p1 = hillLetterToNum(ch1);
+    const p2 = hillLetterToNum(ch2);
+
+    steps.push({
+      type: 'hill-pair-letters',
+      pairIndex,
+      description: `Cặp ${pairIndex + 1}: "${ch1}${ch2}" → số (${p1}, ${p2}) theo A=0,...,Z=25.`,
+      data: { ch1, ch2, p1, p2 },
+    });
+
+    const r1 = hillMod(workingMatrix[0][0] * p1 + workingMatrix[0][1] * p2, 26);
+    const r2 = hillMod(workingMatrix[1][0] * p1 + workingMatrix[1][1] * p2, 26);
+
+    steps.push({
+      type: 'hill-pair-multiply',
+      pairIndex,
+      description:
+        `Cặp ${pairIndex + 1}: nhân ma trận với vectơ (p1, p2) rồi rút gọn mod 26 — ` +
+        `r1 = (${workingMatrix[0][0]}×${p1} + ${workingMatrix[0][1]}×${p2}) mod 26 = ${r1}; ` +
+        `r2 = (${workingMatrix[1][0]}×${p1} + ${workingMatrix[1][1]}×${p2}) mod 26 = ${r2}.`,
+      data: { p1, p2, r1, r2, matrix: workingMatrix },
+    });
+
+    const outCh1 = hillNumToLetter(r1);
+    const outCh2 = hillNumToLetter(r2);
+
+    steps.push({
+      type: 'hill-pair-output',
+      pairIndex,
+      description: `Cặp ${pairIndex + 1}: (${r1}, ${r2}) → chữ cái "${outCh1}${outCh2}".`,
+      data: { r1, r2, outCh1, outCh2 },
+    });
+
+    output += outCh1 + outCh2;
+  }
+
+  steps.push({
+    type: 'hill-output',
+    description: `Ghép tất cả các cặp lại theo đúng thứ tự: kết quả = "${output}".`,
+    data: { result: output },
+  });
+
+  return { steps, result: output };
+}
+
+algorithmManager.register('hill', {
+  label: 'Hill Cipher (2x2)',
+  requiresKey: true,
+  decodable: true,
+  keyHint: 'Nhập 4 chữ cái làm khóa ma trận 2x2 (vd: HILL). Mỗi chữ cái ứng với số A=0,...,Z=25.',
+  explanation:
+    'Hill Cipher là một mã hóa khối cổ điển dựa trên đại số tuyến tính: khóa là một ma trận vuông ' +
+    '(ở đây là 2x2), và văn bản (chỉ gồm chữ cái A-Z) được chia thành từng cặp ký tự, chuyển sang số ' +
+    '(A=0,...,Z=25), rồi nhân với ma trận khóa theo modulo 26 để tạo ra cặp ký tự mật mã. Giải mã dùng ' +
+    'ma trận nghịch đảo của khóa (modulo 26) — chỉ tồn tại khi định thức của ma trận khóa nguyên tố cùng ' +
+    'nhau với 26 (ƯCLN(định thức, 26) = 1). Đây là ví dụ kinh điển cho thấy vì sao một phép biến đổi cần ' +
+    'khả nghịch (như XOR hay Base64) thì mới có thể giải mã được — khác với AND/OR vốn làm mất thông tin.',
+  generateSteps: ({ mode, input, key }) => computeHillSteps(mode, input ?? '', key ?? '').steps,
+  execute: ({ mode, input, steps }) => {
+    const outputStep = steps[steps.length - 1];
+    const result = outputStep && outputStep.data ? outputStep.data.result : '';
+    const label = mode === 'decrypt' ? 'Giải mã' : 'Mã hóa';
+    return `Hill Cipher ${label}("${input ?? ''}") = ${result}`;
+  },
+});
 
 // ---------------------------------------------------------------------------
 // MD5 — Trình minh họa giáo dục (educational MD5 visualizer)
@@ -1109,6 +1368,7 @@ algorithmManager.register('base64', {
   label: 'Base64',
   requiresKey: false,
   keyHint: '',
+  decodable: true,
   explanation:
     'Base64 là phương pháp biểu diễn dữ liệu nhị phân dưới dạng chuỗi ký tự ASCII an toàn để truyền qua ' +
     'các kênh chỉ hỗ trợ văn bản. Khi mã hóa, dữ liệu được chia thành từng khối 3 byte (24 bit); mỗi khối ' +

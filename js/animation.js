@@ -1,7 +1,7 @@
 // animation.js — Generic step/playback state machine for the
 // simulation. Knows how to move between step indices and manage
 // autorun timing. Knows nothing about what a "step" actually computes;
-
+// that logic belongs to algorithms.js in a future task.
 
 export const PlaybackState = Object.freeze({
   IDLE: 'idle',
