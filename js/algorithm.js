@@ -388,6 +388,12 @@ function computeBitwiseSteps(opId, mode, textA, textB) {
         ? 'Chuỗi hex đầu vào và Text B đều trống — không có byte nào để giải mã.'
         : 'Cả hai văn bản đều trống — không có ký tự nào để so sánh bit.',
     });
+    steps.push({
+      type: 'bitwise-summary',
+      isDecrypt,
+      description: 'Không có byte nào để tổng hợp.',
+      data: { resultBytes: [], hex: '', text: '' },
+    });
     return { steps, resultBytes };
   }
 
@@ -469,6 +475,18 @@ function computeBitwiseSteps(opId, mode, textA, textB) {
           `= 0x${resultHex} (hex).`,
     });
   }
+
+  const hex = resultBytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  const text = resultBytes.map((b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : '.')).join('');
+
+  steps.push({
+    type: 'bitwise-summary',
+    isDecrypt,
+    description: isDecrypt
+      ? `Ghép ${resultBytes.length} byte đã khôi phục lại: văn bản gốc = "${text}".`
+      : `Ghép ${resultBytes.length} byte kết quả lại theo đúng thứ tự: chuỗi hex cuối cùng = "${hex}".`,
+    data: { resultBytes, hex, text },
+  });
 
   return { steps, resultBytes };
 }

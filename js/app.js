@@ -550,6 +550,36 @@ function renderOutputCard(step) {
   `;
 }
 
+/**
+ * Final aggregate result card — shown once as the LAST step, after all the
+ * per-character "output" cards. This is what makes the complete combined
+ * hex string (encrypt) or fully recovered text (decrypt) visible directly
+ * in the visualization flow, instead of only in the separate "Kết quả" tab.
+ */
+function renderBitwiseSummaryCard(step) {
+  const { resultBytes, hex, text } = step.data;
+
+  if (resultBytes.length === 0) {
+    return renderNoticeCard(step, { title: 'Kết quả cuối cùng' });
+  }
+
+  if (step.isDecrypt) {
+    return renderOutputSummaryCard({
+      title: 'Kết quả cuối cùng — Văn bản đã giải mã',
+      description: step.description,
+      value: text,
+      valueClassName: 'b64-final-output',
+    });
+  }
+
+  return renderOutputSummaryCard({
+    title: 'Kết quả cuối cùng — Chuỗi Hex',
+    description: step.description,
+    value: hex,
+    valueClassName: 'b64-final-output',
+  });
+}
+
 /* ---- Hill Cipher render helpers ---- */
 
 /** A compact 2x2 matrix grid (e.g. the key matrix K or its inverse K⁻¹). */
@@ -835,6 +865,9 @@ function renderVisualization(stepNumber) {
       break;
     case 'output':
       refs.visualizationCanvas.innerHTML = renderOutputCard(step);
+      break;
+    case 'bitwise-summary':
+      refs.visualizationCanvas.innerHTML = renderBitwiseSummaryCard(step);
       break;
 
     // -- Hill Cipher --
