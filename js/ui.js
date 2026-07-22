@@ -254,11 +254,27 @@ export function updateProgress(refs, currentStep, totalSteps) {
  * Show/hide the secondary (key) input depending on whether the
  * selected algorithm requires one, and update its hint text.
  */
-export function toggleSecondaryInput(refs, isVisible, hintText) {
+/**
+ * Show/hide the secondary (key) input depending on whether the
+ * selected algorithm requires one, update its hint text, and — if the
+ * algorithm needs a key of an exact length (e.g. Hill Cipher's 2x2 matrix
+ * needs exactly 4 letters) — cap how many characters can even be typed.
+ * @param {object} refs - result of getDomRefs()
+ * @param {boolean} isVisible
+ * @param {string} [hintText]
+ * @param {number} [exactLength] - if provided, sets maxLength on the input;
+ *   omit (or pass a non-positive number) to remove any length restriction.
+ */
+export function toggleSecondaryInput(refs, isVisible, hintText, exactLength) {
   const wasHidden = refs.inputSecondaryWrap.classList.contains('is-hidden');
   refs.inputSecondaryWrap.classList.toggle('is-hidden', !isVisible);
   if (hintText) {
     refs.inputSecondaryHint.textContent = hintText;
+  }
+  if (Number.isInteger(exactLength) && exactLength > 0) {
+    refs.inputSecondary.maxLength = exactLength;
+  } else {
+    refs.inputSecondary.removeAttribute('maxlength');
   }
   if (isVisible && wasHidden) {
     replayAnimation(refs.inputSecondaryWrap, 'ui-fade-in');

@@ -24,6 +24,9 @@
  * @property {boolean} [decodable] - Thuật toán có hỗ trợ chế độ "Giải mã" thật sự trong ứng dụng
  *   này hay không (mặc định false). Chỉ true cho các thuật toán có phép nghịch đảo đã triển khai
  *   (XOR, Hill Cipher, Base64) — dùng để ẩn/hiện nút "Giải mã" trên giao diện.
+ * @property {number} [exactKeyLength] - Nếu có, khóa PHẢI có đúng số ký tự (chữ cái) này — dùng
+ *   cho Hill Cipher (khóa phải đúng 4 chữ cái cho ma trận 2x2). Dùng để giới hạn maxlength của ô
+ *   nhập khóa và validate trước khi chạy (báo lỗi qua alert() thay vì toast).
  * @property {(ctx: {mode: string, input: string, key: string}) => Array} [generateSteps]
  *   Hàm sinh danh sách các bước trực quan hóa. Chưa được triển khai cho các
  *   thuật toán hiện tại.
@@ -80,6 +83,7 @@ export class AlgorithmManager {
       keyHint: definition.keyHint ?? '',
       explanation: definition.explanation ?? 'Chưa có giải thích cho thuật toán này.',
       decodable: Boolean(definition.decodable),
+      exactKeyLength: Number.isInteger(definition.exactKeyLength) ? definition.exactKeyLength : null,
       generateSteps: typeof definition.generateSteps === 'function' ? definition.generateSteps : null,
       execute: typeof definition.execute === 'function' ? definition.execute : null,
     };
@@ -303,16 +307,64 @@ function toBinary6(value) {
 }
 
 /**
+ * Parse a hex-byte string like "1F 0A 1E 00 0B" or "1F0A1E000B" (any/no
+ * whitespace between byte pairs) into an array of byte values (0–255).
+ * This is the exact format formatBitwiseResult() prints for the encoded
+ * ciphertext, so it's what a user pastes back in to decode.
+ * @throws nếu chuỗi không phải hex hợp lệ hoặc có số ký tự lẻ.
+ */
+function parseHexBytes(hexText) {
+  const cleaned = (hexText ?? '').trim().replace(/\s+/g, '');
+  if (cleaned.length === 0) return [];
+  if (!/^[0-9a-fA-F]+$/.test(cleaned)) {
+    throw new Error(
+      'Đầu vào để giải mã phải là chuỗi hex hợp lệ (chỉ gồm 0-9, A-F, mỗi byte 2 ký tự), ' +
+      'ví dụ: "1F 0A 1E 00 0B" — đúng định dạng mà chế độ mã hóa XOR xuất ra.'
+    );
+  }
+  if (cleaned.length % 2 !== 0) {
+    throw new Error(
+      `Chuỗi hex có số ký tự lẻ (${cleaned.length}) — mỗi byte cần đúng 2 ký tự hex (vd: "1F", "0A").`
+    );
+  }
+  const bytes = [];
+  for (let i = 0; i < cleaned.length; i += 2) {
+    bytes.push(parseInt(cleaned.slice(i, i + 2), 16));
+  }
+  return bytes;
+}
+
+/**
  * Sinh toàn bộ danh sách bước trực quan hóa cho một phép toán bit, cùng danh
  * sách byte kết quả tương ứng.
+ *
+ * Chiều mã hóa (encrypt): Text A là văn bản thường — mỗi ký tự lấy mã ASCII
+ * trực tiếp. Kết quả là byte "ngẫu nhiên" (thường không in được), nên được
+ * hiển thị dạng hex.
+ *
+ * Chiều giải mã (decrypt): Text A được coi là chuỗi hex của khối mật mã đã
+ * mã hóa trước đó (đúng định dạng "Hex: ..." mà chế độ mã hóa xuất ra) —
+ * được parse thành byte thật TRƯỚC khi so sánh bit, thay vì lấy mã ASCII
+ * của chính các ký tự hex đó (đó chính là lỗi cũ). Vì XOR tự nghịch đảo
+ * (A XOR B XOR B = A), XOR lại đúng những byte mật mã này với cùng Text B
+ * sẽ khôi phục lại byte văn bản gốc.
+ *
  * @param {'xor'} opId
+ * @param {'encrypt'|'decrypt'} mode
  * @param {string} textA
  * @param {string} textB
  * @returns {{steps: Array, resultBytes: number[]}}
+ * @throws nếu mode === 'decrypt' và textA không phải chuỗi hex hợp lệ.
  */
-function computeBitwiseSteps(opId, textA, textB) {
+function computeBitwiseSteps(opId, mode, textA, textB) {
   const op = BIT_OPS[opId];
-  const lengthA = textA.length;
+  const isDecrypt = mode === 'decrypt';
+
+  // Chiều giải mã: parse hex NGAY TỪ ĐẦU, trước khi push bất kỳ step nào —
+  // nếu không hợp lệ, ném lỗi rõ ràng mà không để lại tiến trình "lửng lơ".
+  const bytesA = isDecrypt ? parseHexBytes(textA) : null;
+
+  const lengthA = isDecrypt ? bytesA.length : textA.length;
   const lengthB = textB.length;
   const length = Math.max(lengthA, lengthB, 1);
   const steps = [];
@@ -321,16 +373,20 @@ function computeBitwiseSteps(opId, textA, textB) {
   if (lengthA !== lengthB) {
     steps.push({
       type: 'notice',
-      description:
-        `Độ dài hai văn bản không bằng nhau (Text A: ${lengthA} ký tự, Text B: ${lengthB} ký tự). ` +
-        'Ký tự bị thiếu ở bên ngắn hơn sẽ được coi như mã ASCII 0 (NUL) khi so sánh bit.',
+      description: isDecrypt
+        ? `Số byte mật mã (${lengthA}) khác độ dài Text B (${lengthB} ký tự). ` +
+          'Phần thiếu ở bên ngắn hơn sẽ được coi như 0 khi so sánh bit.'
+        : `Độ dài hai văn bản không bằng nhau (Text A: ${lengthA} ký tự, Text B: ${lengthB} ký tự). ` +
+          'Ký tự bị thiếu ở bên ngắn hơn sẽ được coi như mã ASCII 0 (NUL) khi so sánh bit.',
     });
   }
 
   if (lengthA === 0 && lengthB === 0) {
     steps.push({
       type: 'notice',
-      description: 'Cả hai văn bản đều trống — không có ký tự nào để so sánh bit.',
+      description: isDecrypt
+        ? 'Chuỗi hex đầu vào và Text B đều trống — không có byte nào để giải mã.'
+        : 'Cả hai văn bản đều trống — không có ký tự nào để so sánh bit.',
     });
     return { steps, resultBytes };
   }
@@ -338,9 +394,8 @@ function computeBitwiseSteps(opId, textA, textB) {
   for (let i = 0; i < length; i += 1) {
     const hasA = i < lengthA;
     const hasB = i < lengthB;
-    const charA = hasA ? textA[i] : '∅';
     const charB = hasB ? textB[i] : '∅';
-    const codeA = charCodeSafe(textA, i);
+    const codeA = isDecrypt ? (hasA ? bytesA[i] : 0) : charCodeSafe(textA, i);
     const codeB = charCodeSafe(textB, i);
     const binA = toBinary8(codeA);
     const binB = toBinary8(codeB);
@@ -348,21 +403,26 @@ function computeBitwiseSteps(opId, textA, textB) {
     steps.push({
       type: 'ascii',
       charIndex: i,
-      charA,
+      isDecrypt,
+      charA: isDecrypt ? `0x${codeA.toString(16).padStart(2, '0').toUpperCase()}` : hasA ? textA[i] : '∅',
       charB,
       codeA,
       codeB,
-      description:
-        `Ký tự ${i + 1}: A = "${charA}"${hasA ? '' : ' (thiếu, coi như mã 0)'} → mã ASCII ${codeA}; ` +
-        `B = "${charB}"${hasB ? '' : ' (thiếu, coi như mã 0)'} → mã ASCII ${codeB}.`,
+      description: isDecrypt
+        ? `Byte ${i + 1}: A = byte mật mã 0x${codeA.toString(16).padStart(2, '0').toUpperCase()}` +
+          `${hasA ? '' : ' (thiếu, coi như 0)'} = ${codeA}; ` +
+          `B = "${charB}"${hasB ? '' : ' (thiếu, coi như mã 0)'} → mã ASCII ${codeB}.`
+        : `Ký tự ${i + 1}: A = "${hasA ? textA[i] : '∅'}"${hasA ? '' : ' (thiếu, coi như mã 0)'} → mã ASCII ${codeA}; ` +
+          `B = "${charB}"${hasB ? '' : ' (thiếu, coi như mã 0)'} → mã ASCII ${codeB}.`,
     });
 
     steps.push({
       type: 'binary',
       charIndex: i,
+      isDecrypt,
       binA,
       binB,
-      description: `Ký tự ${i + 1}: chuyển sang nhị phân 8-bit — A = ${binA}, B = ${binB}.`,
+      description: `${isDecrypt ? 'Byte' : 'Ký tự'} ${i + 1}: chuyển sang nhị phân 8-bit — A = ${binA}, B = ${binB}.`,
     });
 
     const resultBits = [];
@@ -376,6 +436,7 @@ function computeBitwiseSteps(opId, textA, textB) {
       steps.push({
         type: 'bit',
         charIndex: i,
+        isDecrypt,
         bitPos,
         bitNumberFromLeft: bitPos + 1,
         bitA,
@@ -384,23 +445,28 @@ function computeBitwiseSteps(opId, textA, textB) {
         active,
         opLabel: op.label,
         description:
-          `Ký tự ${i + 1}, bit thứ ${bitPos + 1}/8 (từ trái): A=${bitA}, B=${bitB} → ` +
+          `${isDecrypt ? 'Byte' : 'Ký tự'} ${i + 1}, bit thứ ${bitPos + 1}/8 (từ trái): A=${bitA}, B=${bitB} → ` +
           `${op.label}(${bitA}, ${bitB}) = ${resultBit}${active ? ' — bit kích hoạt' : ''}.`,
       });
     }
 
     const resultByte = parseInt(resultBits.join(''), 2);
     resultBytes.push(resultByte);
+    const resultHex = resultByte.toString(16).padStart(2, '0').toUpperCase();
+    const resultChar = resultByte >= 32 && resultByte <= 126 ? String.fromCharCode(resultByte) : null;
 
     steps.push({
       type: 'output',
       charIndex: i,
+      isDecrypt,
       resultByte,
       resultBin: resultBits.join(''),
-      resultHex: resultByte.toString(16).padStart(2, '0').toUpperCase(),
-      description:
-        `Ký tự ${i + 1}: byte kết quả = ${resultBits.join('')} (nhị phân) = ${resultByte} (thập phân) ` +
-        `= 0x${resultByte.toString(16).padStart(2, '0').toUpperCase()} (hex).`,
+      resultHex,
+      description: isDecrypt
+        ? `Byte ${i + 1}: byte gốc khôi phục = ${resultBits.join('')} (nhị phân) = ${resultByte} (thập phân) ` +
+          `= 0x${resultHex} (hex)${resultChar ? ` → ký tự "${resultChar}"` : ' (không in được)'}.`
+        : `Ký tự ${i + 1}: byte kết quả = ${resultBits.join('')} (nhị phân) = ${resultByte} (thập phân) ` +
+          `= 0x${resultHex} (hex).`,
     });
   }
 
@@ -408,13 +474,23 @@ function computeBitwiseSteps(opId, textA, textB) {
 }
 
 /** Định dạng danh sách byte kết quả thành chuỗi hiển thị ở panel Kết quả. */
-function formatBitwiseResult(resultBytes) {
+function formatBitwiseResult(mode, resultBytes) {
+  const isDecrypt = mode === 'decrypt';
+
   if (resultBytes.length === 0) {
-    return 'Không có dữ liệu đầu ra (cả hai văn bản đều trống).';
+    return isDecrypt
+      ? 'Không có byte nào để giải mã (chuỗi hex đầu vào rỗng).'
+      : 'Không có dữ liệu đầu ra (cả hai văn bản đều trống).';
   }
+
   const hex = resultBytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
   const text = resultBytes.map((b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : '.')).join('');
-  return `Hex: ${hex}\nVăn bản (ký tự không in được hiển thị bằng dấu "."): ${text}`;
+
+  // Giải mã: kết quả có ý nghĩa là VĂN BẢN khôi phục được, nên đưa lên đầu.
+  // Mã hóa: kết quả chính là các byte (thường không in được), nên hex lên đầu.
+  return isDecrypt
+    ? `Văn bản đã giải mã: ${text}\nHex (tham khảo): ${hex}`
+    : `Hex: ${hex}\nVăn bản (ký tự không in được hiển thị bằng dấu "."): ${text}`;
 }
 
 function registerBitwiseAlgorithm(id) {
@@ -429,13 +505,18 @@ function registerBitwiseAlgorithm(id) {
       `sang mã ASCII rồi sang nhị phân 8-bit, sau đó thực hiện ${op.label} trên từng cặp bit để tạo ra ` +
       'byte kết quả. Quá trình được trực quan hóa qua 4 giai đoạn: ASCII → Nhị phân → So sánh từng bit → ' +
       'Byte kết quả. Nếu hai văn bản có độ dài khác nhau, phần thiếu được coi như mã 0 (NUL). XOR tự ' +
-      'nghịch đảo (A XOR B XOR B = A) nên áp dụng lại đúng phép XOR với cùng Text B chính là "giải mã".',
-    generateSteps: ({ input, key }) => computeBitwiseSteps(id, input ?? '', key ?? '').steps,
-    execute: ({ input, key }) => formatBitwiseResult(computeBitwiseSteps(id, input ?? '', key ?? '').resultBytes),
+      'nghịch đảo (A XOR B XOR B = A) nên áp dụng lại đúng phép XOR với cùng Text B chính là "giải mã" — ' +
+      'nhưng vì kết quả mã hóa là byte thô (thường không in được), chế độ Mã hóa nhận Văn bản đầu vào là ' +
+      'văn bản thường và xuất ra chuỗi HEX, còn chế độ Giải mã nhận Văn bản đầu vào LÀ chuỗi hex đó ' +
+      '(vd: "1F 0A 1E 00 0B") và xuất ra văn bản gốc.',
+    generateSteps: ({ mode, input, key }) => computeBitwiseSteps(id, mode, input ?? '', key ?? '').steps,
+    execute: ({ mode, input, key }) =>
+      formatBitwiseResult(mode, computeBitwiseSteps(id, mode, input ?? '', key ?? '').resultBytes),
   });
 }
 
 ['xor'].forEach(registerBitwiseAlgorithm);
+
 
 // ---------------------------------------------------------------------------
 // HILL CIPHER (2x2) — Trình minh họa giáo dục (educational Hill Cipher visualizer)
@@ -474,12 +555,10 @@ function hillModInverse(a, m) {
 /** Chuyển khóa dạng chuỗi (>= 4 chữ cái) thành ma trận 2x2 số nguyên 0–25. */
 function parseHillKey(keyText) {
   const letters = (keyText ?? '').toUpperCase().replace(/[^A-Z]/g, '');
-  if (letters.length < 4) {
-    throw new Error(
-      'Khóa Hill Cipher cần ít nhất 4 chữ cái (A-Z) để tạo ma trận khóa 2x2, ví dụ: "HILL".'
-    );
+  if (letters.length !== 4) {
+    throw new Error('Khóa cần 4 kí tự cho ma trận 2x2');
   }
-  const keyLetters = letters.slice(0, 4);
+  const keyLetters = letters;
   const nums = keyLetters.split('').map((ch) => ch.charCodeAt(0) - 65);
   const matrix = [
     [nums[0], nums[1]],
@@ -669,7 +748,8 @@ algorithmManager.register('hill', {
   label: 'Hill Cipher (2x2)',
   requiresKey: true,
   decodable: true,
-  keyHint: 'Nhập 4 chữ cái làm khóa ma trận 2x2 (vd: HILL). Mỗi chữ cái ứng với số A=0,...,Z=25.',
+  exactKeyLength: 4,
+  keyHint: 'Khóa cần đúng 4 chữ cái cho ma trận 2x2 (vd: HILL). Mỗi chữ cái ứng với số A=0,...,Z=25.',
   explanation:
     'Hill Cipher là một mã hóa khối cổ điển dựa trên đại số tuyến tính: khóa là một ma trận vuông ' +
     '(ở đây là 2x2), và văn bản (chỉ gồm chữ cái A-Z) được chia thành từng cặp ký tự, chuyển sang số ' +

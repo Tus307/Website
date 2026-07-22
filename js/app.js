@@ -92,19 +92,32 @@ function currentMode() {
   return refs.modeDecrypt.checked ? 'decrypt' : 'encrypt';
 }
 
+/**
+ * XOR's decode mode expects the input to be the hex ciphertext (the exact
+ * format its own encode mode prints), not literal plaintext — update the
+ * textarea placeholder so this isn't a silent trap for the user.
+ */
+function updatePrimaryPlaceholder() {
+  const isXorDecrypt = refs.algorithmSelect.value === 'xor' && currentMode() === 'decrypt';
+  refs.inputPrimary.placeholder = isXorDecrypt
+    ? 'Dán chuỗi hex đã mã hóa (vd: "1F 0A 1E 00 0B")...'
+    : 'Nhập văn bản cần mã hóa hoặc giải mã...';
+}
+
 function applyAlgorithmSelection() {
   const meta = algorithmManager.get(refs.algorithmSelect.value);
   if (!meta) return;
 
   setAlgorithmTag(refs, meta.label);
   setExplanation(refs, meta.explanation);
-  toggleSecondaryInput(refs, meta.requiresKey, meta.keyHint);
+  toggleSecondaryInput(refs, meta.requiresKey, meta.keyHint, meta.exactKeyLength);
 
   const forcedToEncrypt = toggleDecryptMode(refs, meta.decodable);
   if (forcedToEncrypt) {
     logger.log(`Thuật toán "${meta.label}" chưa hỗ trợ giải mã trong ứng dụng này — chuyển về chế độ mã hóa.`);
   }
 
+  updatePrimaryPlaceholder();
   logger.log(`Đã chọn thuật toán: ${meta.label}.`);
   resetRunState({ silent: true });
 }
@@ -167,6 +180,18 @@ async function ensureRunStarted() {
   if (meta.requiresKey && !key) {
     showToast(`Thuật toán "${meta.label}" yêu cầu ${meta.keyHint || 'khóa/tham số thứ hai'}.`, 'error');
     return false;
+  }
+
+  if (meta.exactKeyLength) {
+    // Count only letters (A-Z), matching how the algorithm itself parses the
+    // key (e.g. Hill Cipher's 2x2 matrix ignores spaces/punctuation) — so a
+    // key that *looks* like 4 characters but includes a non-letter is still
+    // correctly flagged as wrong.
+    const letterCount = key.toUpperCase().replace(/[^A-Z]/g, '').length;
+    if (letterCount !== meta.exactKeyLength) {
+      alert('Khóa cần 4 kí tự cho ma trận 2x2');
+      return false;
+    }
   }
 
   const myGeneration = runGeneration;
@@ -415,14 +440,18 @@ function renderRegisterRow(entries) {
 /* ---- Bitwise (XOR) render helpers ---- */
 
 function renderAsciiCard(step) {
+  const labelA = step.isDecrypt ? 'Byte mật mã' : 'Text A';
+  const title = step.isDecrypt
+    ? `Byte ${step.charIndex + 1} — Hex → ASCII`
+    : `Ký tự ${step.charIndex + 1} — ASCII`;
   return `
     <div class="bwv-card">
-      <div class="bwv-card-title">Ký tự ${step.charIndex + 1} — ASCII</div>
+      <div class="bwv-card-title">${title}</div>
       <div class="bwv-pair">
         <div class="bwv-slot bwv-slot--a">
-          <span class="bwv-slot-label">Text A</span>
+          <span class="bwv-slot-label">${labelA}</span>
           <span class="bwv-slot-char">${escapeHtml(step.charA)}</span>
-          <span class="bwv-slot-code">ASCII ${step.codeA}</span>
+          <span class="bwv-slot-code">${step.isDecrypt ? '' : 'ASCII '}${step.codeA}</span>
         </div>
         <div class="bwv-slot bwv-slot--b">
           <span class="bwv-slot-label">Text B</span>
@@ -435,12 +464,16 @@ function renderAsciiCard(step) {
 }
 
 function renderBinaryCard(step) {
+  const title = step.isDecrypt
+    ? `Byte ${step.charIndex + 1} — Nhị phân 8-bit`
+    : `Ký tự ${step.charIndex + 1} — Nhị phân 8-bit`;
+  const labelA = step.isDecrypt ? 'Byte mật mã' : 'Text A';
   return `
     <div class="bwv-card">
-      <div class="bwv-card-title">Ký tự ${step.charIndex + 1} — Nhị phân 8-bit</div>
+      <div class="bwv-card-title">${title}</div>
       <div class="bwv-binary-row">
         <div class="bwv-binary-col">
-          <span class="bwv-binary-label">Text A</span>
+          <span class="bwv-binary-label">${labelA}</span>
           <span class="bwv-binary-value bwv-binary-value--a">${step.binA}</span>
         </div>
         <div class="bwv-binary-col">
@@ -479,12 +512,14 @@ function renderBitCard(step) {
     `);
   }
 
+  const unitLabel = step.isDecrypt ? 'Byte' : 'Ký tự';
+  const legendA = step.isDecrypt ? 'Byte mật mã' : 'Text A';
   return `
     <div class="bwv-card">
-      <div class="bwv-card-title">Ký tự ${step.charIndex + 1} — So sánh bit ${step.bitNumberFromLeft}/8 (${step.opLabel})</div>
+      <div class="bwv-card-title">${unitLabel} ${step.charIndex + 1} — So sánh bit ${step.bitNumberFromLeft}/8 (${step.opLabel})</div>
       <div class="bwv-bit-row">${cols.join('')}</div>
       <div class="bwv-bit-legend">
-        <span><i class="bwv-swatch bwv-swatch--a"></i>Text A</span>
+        <span><i class="bwv-swatch bwv-swatch--a"></i>${legendA}</span>
         <span><i class="bwv-swatch bwv-swatch--b"></i>Text B</span>
         <span><i class="bwv-swatch bwv-swatch--active"></i>Bit kích hoạt</span>
       </div>
@@ -493,14 +528,23 @@ function renderBitCard(step) {
 }
 
 function renderOutputCard(step) {
+  const title = step.isDecrypt
+    ? `Byte ${step.charIndex + 1} — Byte gốc khôi phục`
+    : `Ký tự ${step.charIndex + 1} — Byte kết quả`;
+  const resultChar = step.resultByte >= 32 && step.resultByte <= 126 ? String.fromCharCode(step.resultByte) : null;
+  const charBadge =
+    step.isDecrypt && resultChar
+      ? `<span class="bwv-output-arrow">→</span><span class="bwv-output-dec">"${escapeHtml(resultChar)}"</span>`
+      : '';
   return `
     <div class="bwv-card bwv-card--output">
-      <div class="bwv-card-title">Ký tự ${step.charIndex + 1} — Byte kết quả</div>
+      <div class="bwv-card-title">${title}</div>
       <div class="bwv-output-row">
         <span class="bwv-output-bin">${step.resultBin}</span>
         <span class="bwv-output-arrow">→</span>
         <span class="bwv-output-dec">${step.resultByte}</span>
         <span class="bwv-output-hex">0x${step.resultHex}</span>
+        ${charBadge}
       </div>
     </div>
   `;
@@ -941,6 +985,7 @@ function renderVisualization(stepNumber) {
 /** Shared handler for the two mode radios — only the log message differs. */
 function handleModeChange(modeLabel) {
   logger.log(`Chuyển sang chế độ ${modeLabel}.`);
+  updatePrimaryPlaceholder();
   resetRunState({ silent: true });
 }
 
