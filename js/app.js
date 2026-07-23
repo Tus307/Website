@@ -18,7 +18,6 @@
 import {
   getDomRefs,
   initTabs,
-  setStatus,
   updateProgress,
   toggleSecondaryInput,
   toggleDecryptMode,
@@ -61,28 +60,13 @@ const animation = new AnimationController({
 
 algorithmManager.attachAnimation(animation);
 
-const STATE_LABELS = {
-  [PlaybackState.IDLE]: 'Sẵn sàng',
-  [PlaybackState.RUNNING]: 'Đang chạy tự động',
-  [PlaybackState.PAUSED]: 'Đã tạm dừng',
-  [PlaybackState.FINISHED]: 'Hoàn tất mô phỏng',
-};
-
-const STATE_KEYS = {
-  [PlaybackState.IDLE]: 'ready',
-  [PlaybackState.RUNNING]: 'running',
-  [PlaybackState.PAUSED]: 'paused',
-  [PlaybackState.FINISHED]: 'finished',
-};
-
 const CANVAS_PLACEHOLDER =
   '<p class="canvas-placeholder">Khu vực trực quan hóa các bước biến đổi dữ liệu sẽ hiển thị tại đây.</p>';
 const RESULT_PLACEHOLDER =
   '<p class="result-placeholder">Kết quả sau khi mã hóa hoặc giải mã sẽ xuất hiện ở đây.</p>';
 
-/** Reflect the AnimationController's playback state in the status dot/label and buttons. */
+/** Reflect the AnimationController's playback state in the playback buttons. */
 function reflectPlaybackState(state) {
-  setStatus(refs, STATE_KEYS[state], STATE_LABELS[state]);
   const isRunning = state === PlaybackState.RUNNING;
   setButtonsDisabled([refs.btnPause], !isRunning);
   setButtonsDisabled([refs.btnAutorun], isRunning);

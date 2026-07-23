@@ -64,7 +64,7 @@ export class AlgorithmManager {
 
   /**
    * Đăng ký một thuật toán mới vào registry.
-   * @param {string} id - Định danh duy nhất (vd: "caesar").
+   * @param {string} id - Định danh duy nhất (vd: "xor").
    * @param {AlgorithmDefinition} definition
    * @returns {AlgorithmDefinition} entry đã được chuẩn hóa.
    */
@@ -230,43 +230,12 @@ export class AlgorithmManager {
 }
 
 // ---------------------------------------------------------------------------
-// Instance mặc định + đăng ký metadata cho 6 thuật toán hiện có trong giao diện.
-// CHƯA có generateSteps / execute — sẽ được bổ sung ở các nhiệm vụ tiếp theo.
+// Instance mặc định. Chỉ đăng ký các thuật toán ĐÃ triển khai đầy đủ
+// (generateSteps + execute) — Bitwise XOR, Hill Cipher, MD5, SHA-256, Base64.
+// Caesar/Vigenère/AES/RSA đã bị loại bỏ khỏi ứng dụng vì chưa có logic thật.
 // ---------------------------------------------------------------------------
 
 export const algorithmManager = new AlgorithmManager();
-
-algorithmManager.register('caesar', {
-  label: 'Caesar Cipher',
-  requiresKey: true,
-  keyHint: 'Nhập một số nguyên làm độ dịch chuyển (vd: 3).',
-  explanation:
-    'Caesar Cipher là một trong những phương pháp mã hóa cổ điển nhất, dịch chuyển mỗi ký tự trong bảng chữ cái đi một số vị trí cố định. Đây là dạng đơn giản của mã hóa thay thế (substitution cipher), dễ bị phá vỡ bằng phân tích tần suất.',
-});
-
-algorithmManager.register('vigenere', {
-  label: 'Vigenère Cipher',
-  requiresKey: true,
-  keyHint: 'Nhập một chuỗi ký tự làm từ khóa (vd: KEY).',
-  explanation:
-    'Vigenère Cipher sử dụng một từ khóa lặp lại để mã hóa văn bản bằng nhiều bảng Caesar khác nhau, giúp chống lại phân tích tần suất đơn giản hơn so với Caesar Cipher. Đây là một dạng mã hóa đa bảng (polyalphabetic substitution).',
-});
-
-algorithmManager.register('aes', {
-  label: 'AES',
-  requiresKey: true,
-  keyHint: 'Nhập khóa bí mật (độ dài tùy phiên bản AES).',
-  explanation:
-    'AES (Advanced Encryption Standard) là thuật toán mã hóa khối đối xứng hiện đại, xử lý dữ liệu theo từng khối 128-bit qua nhiều vòng biến đổi (SubBytes, ShiftRows, MixColumns, AddRoundKey). Đây là chuẩn mã hóa được sử dụng rộng rãi nhất hiện nay.',
-});
-
-algorithmManager.register('rsa', {
-  label: 'RSA',
-  requiresKey: true,
-  keyHint: 'Nhập tham số khóa công khai/riêng tư liên quan.',
-  explanation:
-    'RSA là thuật toán mã hóa khóa công khai dựa trên độ khó của bài toán phân tích thừa số nguyên tố lớn. Mỗi bên có một cặp khóa: khóa công khai để mã hóa và khóa riêng tư để giải mã.',
-});
 
 // Lưu ý: 'base64' được đăng ký đầy đủ (generateSteps + execute) ở cuối file,
 // ngay sau phần SHA-256 — xem khối "BASE64 — Trình minh họa giáo dục".

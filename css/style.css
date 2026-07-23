@@ -164,21 +164,6 @@ body{
   font-size: 12.5px;
   color: var(--text-secondary);
 }
-.header-status{
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  padding: 6px 12px;
-  border: 1px solid var(--border-glass);
-  border-radius: 999px;
-  background: rgba(255,255,255,0.02);
-  flex-shrink: 0;
-}
-.status-dot{
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px rgba(110,231,183,0.15);
-}
 
 /* =========================================================
    BỐ CỤC CHÍNH: SIDEBAR + NỘI DUNG
@@ -618,7 +603,6 @@ body{
 @media (max-width: 640px){
   .app-shell{ padding: 14px 14px 28px; gap: 14px; }
   .app-header{ flex-wrap: wrap; padding: 14px 16px; }
-  .header-status{ order: 3; }
   .brand-title{ font-size: 16.5px; }
   .control-buttons{ grid-template-columns: repeat(2, 1fr); }
   .btn-primary{ grid-column: span 2; }

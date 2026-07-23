@@ -118,9 +118,6 @@ function replayAnimation(element, className) {
  */
 export function getDomRefs() {
   return {
-    statusIndicator: qs('#status-indicator'),
-    statusLabel: qs('#status-label'),
-
     algorithmSelect: qs('#algorithm-select'),
     modeEncrypt: qs('#mode-encrypt'),
     modeDecrypt: qs('#mode-decrypt'),
@@ -223,18 +220,8 @@ export function initTabs(refs, onChange) {
 }
 
 /* =========================================================
-   STATUS / PROGRESS
+   PROGRESS
    ========================================================= */
-
-/**
- * Update the small status dot + label in the header.
- * @param {'ready'|'running'|'paused'|'finished'} stateKey
- * @param {string} label - Vietnamese status text.
- */
-export function setStatus(refs, stateKey, label) {
-  refs.statusIndicator.dataset.state = stateKey;
-  refs.statusLabel.textContent = label;
-}
 
 /**
  * Reflect the current step number in the progress bar and its label.
